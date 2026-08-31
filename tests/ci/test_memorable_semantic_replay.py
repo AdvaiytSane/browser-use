@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from examples.integrations.memorable import replay as replay_module
 from examples.integrations.memorable.procedure import (
 	BrowserProcedure,
 	ParameterKind,
@@ -15,6 +16,8 @@ from examples.integrations.memorable.procedure import (
 	SemanticLocator,
 	SiteScope,
 	ValueBinding,
+	_effective_action_steps,
+	_stable_locator_fields,
 	compile_procedure,
 )
 from examples.integrations.memorable.replay import (
@@ -294,6 +297,119 @@ def test_compiler_retains_semantics_and_drops_volatile_inputs(tmp_path):
 	assert 'x_path' not in step.locator.required
 	assert 'stable_hash' not in step.locator.required
 	assert procedure.training['model_calls_during_compile'] == 0
+
+
+def test_compiler_can_migrate_legacy_capture_identity(tmp_path):
+	_write_synthetic_run(tmp_path, 'run-a', 'random-a1b2c3d4', 7)
+	_write_synthetic_run(tmp_path, 'run-b', 'random-deadbeef', 42)
+
+	procedure = compile_procedure(tmp_path, procedure_task_fingerprint='canonical-task-fingerprint')
+
+	assert procedure.task_fingerprint == 'canonical-task-fingerprint'
+	assert procedure.training['capture_task_fingerprint'] == 'task-1'
+
+
+def test_retry_recovery_collapses_to_terminal_control_actions():
+	def step(action_name: str, name: str, input_type: str = 'text') -> dict:
+		return {
+			'action_name': action_name,
+			'selected_candidate': {
+				'node_name': 'input' if input_type != 'submit' else 'button',
+				'attributes': {'name': name, 'type': input_type},
+			},
+		}
+
+	raw = [
+		step('input', 'email', 'email'),
+		step('click', 'help', 'button'),
+		step('input', 'email', 'email'),
+		step('click', 'submit', 'submit'),
+		step('click', 'submit', 'submit'),
+	]
+
+	effective = _effective_action_steps(raw)
+
+	assert effective == [raw[1], raw[2], raw[4]]
+
+
+def test_three_run_majority_can_select_unique_radio_value():
+	candidates = [
+		{
+			'node_name': 'INPUT',
+			'ax_role': 'radio',
+			'ax_name': label,
+			'attributes': {'name': 'contactMethod', 'type': 'radio', 'value': value},
+		}
+		for label, value in [('Email', 'email'), ('Phone', 'phone'), ('Phone', 'phone')]
+	]
+
+	locator = _stable_locator_fields(candidates)
+
+	assert locator['attributes.value'] == 'phone'
+	assert locator['ax_name'] == 'phone'
+
+
+def test_file_upload_contract_needs_no_secret_value_in_postcondition():
+	step = ProcedureStep(
+		id='document',
+		action=ReplayAction.UPLOAD_FILE,
+		locator=_locator(
+			node_name='input',
+			ax_role='button',
+			ax_name='document',
+			**{'attributes.name': 'document', 'attributes.type': 'file'},
+		),
+		optional=False,
+		route_coverage=1,
+		order_score=0,
+		value=ValueBinding(parameter='document'),
+		postcondition=ProcedurePostcondition(kind=PostconditionKind.CONTROL_FILES_SELECTED),
+		source_runs=['a', 'b', 'c'],
+	)
+
+	assert step.postcondition.value is None
+
+
+@pytest.mark.asyncio
+async def test_file_upload_postcondition_reads_browser_file_count_without_value_binding(monkeypatch, tmp_path):
+	step = ProcedureStep(
+		id='document',
+		action=ReplayAction.UPLOAD_FILE,
+		locator=_locator(
+			node_name='input',
+			ax_role='button',
+			ax_name='document',
+			**{'attributes.name': 'document', 'attributes.type': 'file'},
+		),
+		optional=False,
+		route_coverage=1,
+		order_score=0,
+		value=ValueBinding(parameter='document'),
+		postcondition=ProcedurePostcondition(kind=PostconditionKind.CONTROL_FILES_SELECTED),
+		source_runs=['a', 'b', 'c'],
+	)
+
+	async def live_page(_browser_session):
+		return {
+			'rendered_text': '',
+			'controls': [
+				{
+					'node_name': 'input',
+					'ax_role': 'button',
+					'ax_name': 'document',
+					'attributes': {'name': 'document', 'type': 'file'},
+					'file_count': 1,
+				}
+			],
+		}
+
+	monkeypatch.setattr(replay_module, '_read_live_page', live_page)
+	verification = await DeterministicReplayer(
+		_procedure('http://127.0.0.1:9000/variant-a.html'), ReplayOptions(output_dir=tmp_path)
+	)._check_postcondition(None, step, {})  # type: ignore[arg-type]
+
+	assert verification.verified is True
+	assert verification.evidence['observed_file_count'] == 1
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,7 @@ from examples.integrations.memorable.bu_bench import (
 	task_fingerprint,
 	write_checkpoint,
 )
+from examples.integrations.memorable.offline_capture import canonical_task_fingerprint
 
 
 def _record(mode: TrialMode, *, score: int | None, judge: JudgeStatus = JudgeStatus.COMPLETED) -> TrialRecord:
@@ -102,4 +103,6 @@ def test_task_identity_and_start_url_are_stable():
 	equivalent = task.model_copy(update={'confirmed_task': 'open https://example.test/form and submit it.'})
 
 	assert task_fingerprint(task) == task_fingerprint(equivalent)
+	assert task_fingerprint(task) == canonical_task_fingerprint(task.confirmed_task)
+	assert len(task_fingerprint(task)) == 64
 	assert start_url(task) == 'https://example.test/form'

@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PROCEDURE_SCHEMA_VERSION = '0.1.0'
-SUPPORTED_ACTIONS = {'input', 'click', 'select_dropdown'}
+SUPPORTED_ACTIONS = {'input', 'click', 'select_dropdown', 'upload_file'}
 SAFE_LOCATOR_FIELDS = (
 	'node_name',
 	'ax_role',
@@ -30,6 +30,7 @@ SAFE_LOCATOR_FIELDS = (
 	'attributes.autocomplete',
 	'attributes.name',
 	'attributes.type',
+	'attributes.value',
 	'attributes.aria-label',
 	'attributes.placeholder',
 	'attributes.data-action',
@@ -45,16 +46,19 @@ class ReplayAction(str, Enum):
 	INPUT = 'input'
 	CLICK = 'click'
 	SELECT_DROPDOWN = 'select_dropdown'
+	UPLOAD_FILE = 'upload_file'
 
 
 class ParameterKind(str, Enum):
 	TEXT = 'text'
 	OPTION = 'option'
+	FILE = 'file'
 
 
 class PostconditionKind(str, Enum):
 	CONTROL_VALUE_EQUALS = 'control_value_equals'
 	CONTROL_CHECKED_EQUALS = 'control_checked_equals'
+	CONTROL_FILES_SELECTED = 'control_files_selected'
 	TARGET_DISAPPEARS = 'target_disappears'
 	EXPECTED_TEXT_APPEARS = 'expected_text_appears'
 
@@ -129,12 +133,12 @@ class ProcedureStep(BaseModel):
 
 	@model_validator(mode='after')
 	def validate_action_value(self) -> ProcedureStep:
-		if self.action in {ReplayAction.INPUT, ReplayAction.SELECT_DROPDOWN} and self.value is None:
+		if self.action in {ReplayAction.INPUT, ReplayAction.SELECT_DROPDOWN, ReplayAction.UPLOAD_FILE} and self.value is None:
 			raise ValueError(f'{self.action.value} requires a value binding')
 		if self.action == ReplayAction.CLICK and self.value is not None:
 			target_type = self.locator.required.get('attributes.type')
-			if not (target_type == 'checkbox' and isinstance(self.value.literal, bool)):
-				raise ValueError('Only checkbox clicks can have a boolean literal value')
+			if not (target_type in {'checkbox', 'radio'} and isinstance(self.value.literal, bool)):
+				raise ValueError('Only checkbox and radio clicks can have a boolean literal value')
 		return self
 
 
@@ -210,6 +214,7 @@ def compile_procedure(
 	capture_root: str | Path,
 	*,
 	task_fingerprint: str | None = None,
+	procedure_task_fingerprint: str | None = None,
 	minimum_successful_runs: int = 2,
 ) -> BrowserProcedure:
 	"""Compile one task group of evidence-backed captures into a procedure."""
@@ -237,7 +242,7 @@ def compile_procedure(
 		action_payloads = _history_action_payloads(run.history)
 		position = 0
 		occurrences: Counter[str] = Counter()
-		for step in run.derived.get('steps', []):
+		for step in _effective_action_steps(run.derived.get('steps', [])):
 			action_name = str(step.get('action_name') or '')
 			candidate = step.get('selected_candidate')
 			if action_name not in SUPPORTED_ACTIONS or not isinstance(candidate, dict):
@@ -283,11 +288,13 @@ def compile_procedure(
 	steps.sort(key=lambda step: (step.order_score, step.id))
 
 	origins, paths = _site_scope(selected_runs)
-	expected_success_text = _consensus_expected_success_text(selected_runs)
+	expected_success_text = _consensus_expected_success_text(selected_runs) or _consensus_submit_success_text(selected_runs)
 	_submit_postcondition(steps, expected_success_text)
 
+	compiled_task_fingerprint = procedure_task_fingerprint or task_fingerprint
 	training = {
 		'capture_root': str(root),
+		'capture_task_fingerprint': task_fingerprint,
 		'successful_runs': len(selected_runs),
 		'run_directories': sorted(run.directory.name for run in selected_runs),
 		'route_variants': _route_variants(selected_runs),
@@ -298,7 +305,7 @@ def compile_procedure(
 	}
 	compiled_at = datetime.now(timezone.utc).isoformat()
 	identity_payload = {
-		'task_fingerprint': task_fingerprint,
+		'task_fingerprint': compiled_task_fingerprint,
 		'site_scope': {'allowed_origins': origins, 'allowed_paths': paths},
 		'expected_success_text': expected_success_text,
 		'parameters': [parameter.model_dump(mode='json') for parameter in sorted(parameter_map.values(), key=lambda p: p.name)],
@@ -309,7 +316,7 @@ def compile_procedure(
 	return BrowserProcedure(
 		procedure_id=procedure_id,
 		compiled_at=compiled_at,
-		task_fingerprint=task_fingerprint,
+		task_fingerprint=compiled_task_fingerprint,
 		site_scope=SiteScope(allowed_origins=origins, allowed_paths=paths),
 		expected_success_text=expected_success_text,
 		parameters=sorted(parameter_map.values(), key=lambda parameter: parameter.name),
@@ -380,14 +387,14 @@ def _compile_step(
 	value: ValueBinding | None = None
 	candidate = observations[0].candidate
 	attributes = candidate.get('attributes') or {}
-	if action_name in {'input', 'select_dropdown'}:
+	if action_name in {'input', 'select_dropdown', 'upload_file'}:
 		parameter = _parameter_for(candidate, action_name)
 		existing = parameter_map.get(parameter.name)
 		if existing is not None and existing != parameter:
 			raise ProcedureCompilationError(f'Conflicting parameter inference for {parameter.name}')
 		parameter_map[parameter.name] = parameter
 		value = ValueBinding(parameter=parameter.name)
-	elif action_name == 'click' and _normalize(attributes.get('type')) == 'checkbox':
+	elif action_name == 'click' and _normalize(attributes.get('type')) in {'checkbox', 'radio'}:
 		value = ValueBinding(literal=True)
 
 	postcondition = _postcondition_for(action_name, locator_fields, value)
@@ -418,7 +425,11 @@ def _stable_locator_fields(candidates: list[dict[str, Any]]) -> dict[str, str]:
 		if len(populated) != len(candidates):
 			continue
 		winning_value, winning_count = Counter(populated).most_common(1)[0]
-		if winning_count / len(candidates) >= 0.8:
+		# Three successful traces can legitimately disagree on an interchangeable
+		# option (for example, two choose "phone" and one chooses "email").  A
+		# strict majority is usable only because _compile_step subsequently proves
+		# that the resulting conjunction is unique in every captured page state.
+		if winning_count == len(candidates) or (len(candidates) >= 3 and winning_count / len(candidates) >= 2 / 3):
 			required[field] = winning_value
 	return required
 
@@ -456,7 +467,7 @@ def _parameter_for(candidate: dict[str, Any], action_name: str) -> ProcedurePara
 		if value:
 			return ProcedureParameter(
 				name=_snake_case(str(value)),
-				kind=ParameterKind.TEXT if action_name == 'input' else ParameterKind.OPTION,
+				kind=_parameter_kind(action_name),
 				source_locator_field=f'attributes.{field}',
 			)
 	name = candidate.get('ax_name') or candidate.get('meaningful_text')
@@ -464,7 +475,7 @@ def _parameter_for(candidate: dict[str, Any], action_name: str) -> ProcedurePara
 		raise ProcedureCompilationError('Cannot infer a safe runtime parameter name for an input action')
 	return ProcedureParameter(
 		name=_snake_case(str(name)),
-		kind=ParameterKind.TEXT if action_name == 'input' else ParameterKind.OPTION,
+		kind=_parameter_kind(action_name),
 		source_locator_field='ax_name',
 	)
 
@@ -472,7 +483,9 @@ def _parameter_for(candidate: dict[str, Any], action_name: str) -> ProcedurePara
 def _postcondition_for(action_name: str, locator_fields: dict[str, str], value: ValueBinding | None) -> ProcedurePostcondition:
 	if action_name in {'input', 'select_dropdown'}:
 		return ProcedurePostcondition(kind=PostconditionKind.CONTROL_VALUE_EQUALS, value=value)
-	if locator_fields.get('attributes.type') == 'checkbox':
+	if action_name == 'upload_file':
+		return ProcedurePostcondition(kind=PostconditionKind.CONTROL_FILES_SELECTED)
+	if locator_fields.get('attributes.type') in {'checkbox', 'radio'}:
 		return ProcedurePostcondition(
 			kind=PostconditionKind.CONTROL_CHECKED_EQUALS,
 			value=ValueBinding(literal=True),
@@ -523,6 +536,84 @@ def _consensus_expected_success_text(runs: list[_CapturedRun]) -> str | None:
 	return value
 
 
+def _parameter_kind(action_name: str) -> ParameterKind:
+	if action_name == 'input':
+		return ParameterKind.TEXT
+	if action_name == 'select_dropdown':
+		return ParameterKind.OPTION
+	if action_name == 'upload_file':
+		return ParameterKind.FILE
+	raise ProcedureCompilationError(f'Action {action_name!r} cannot produce a runtime parameter')
+
+
+def _effective_action_steps(raw_steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+	"""Keep terminal writes and submit attempts while retaining ordinary clicks.
+
+	Form controls use last-write-wins semantics.  A successful run may contain
+	several rejected values for the same input or several submit attempts; those
+	are recovery evidence, not procedure steps.  We collapse only mutable
+	controls, radio choices, and submit buttons.  Checkboxes and ordinary buttons
+	remain untouched because repeated clicks can carry distinct meaning.
+	"""
+
+	last_for_key: dict[str, int] = {}
+	for index, step in enumerate(raw_steps):
+		action_name = str(step.get('action_name') or '')
+		candidate = step.get('selected_candidate')
+		if action_name not in SUPPORTED_ACTIONS or not isinstance(candidate, dict):
+			continue
+		attributes = candidate.get('attributes') or {}
+		input_type = _normalize(attributes.get('type'))
+		collapsible = action_name in {'input', 'select_dropdown', 'upload_file'} or (
+			action_name == 'click' and input_type in {'radio', 'submit'}
+		)
+		if collapsible:
+			last_for_key[_alignment_base(action_name, candidate)] = index
+
+	effective: list[dict[str, Any]] = []
+	for index, step in enumerate(raw_steps):
+		action_name = str(step.get('action_name') or '')
+		candidate = step.get('selected_candidate')
+		if action_name not in SUPPORTED_ACTIONS or not isinstance(candidate, dict):
+			effective.append(step)
+			continue
+		attributes = candidate.get('attributes') or {}
+		input_type = _normalize(attributes.get('type'))
+		collapsible = action_name in {'input', 'select_dropdown', 'upload_file'} or (
+			action_name == 'click' and input_type in {'radio', 'submit'}
+		)
+		if not collapsible or last_for_key.get(_alignment_base(action_name, candidate)) == index:
+			effective.append(step)
+	return effective
+
+
+def _consensus_submit_success_text(runs: list[_CapturedRun]) -> str | None:
+	"""Infer exact page evidence added by the terminal successful submit."""
+
+	added_by_run: list[set[str]] = []
+	for run in runs:
+		submit_steps = [
+			step
+			for step in run.derived.get('steps', [])
+			if step.get('action_name') == 'click'
+			and _normalize(((step.get('selected_candidate') or {}).get('attributes') or {}).get('type')) == 'submit'
+		]
+		if not submit_steps:
+			return None
+		step_number = int(submit_steps[-1].get('step', -1))
+		step_dir = run.directory / 'steps' / f'{step_number:03d}'
+		try:
+			before = {_normalize(line) for line in (step_dir / 'pre.rendered.txt').read_text().splitlines() if _normalize(line)}
+			after_lines = [line.strip() for line in (step_dir / 'post.rendered.txt').read_text().splitlines() if line.strip()]
+		except OSError:
+			return None
+		added_by_run.append({line for line in after_lines if _normalize(line) not in before})
+	if not added_by_run:
+		return None
+	consensus = set.intersection(*added_by_run)
+	return max(consensus, key=len) if consensus else None
+
+
 def _route_variants(runs: list[_CapturedRun]) -> list[dict[str, Any]]:
 	counts = Counter(tuple(run.derived.get('route_signature') or []) for run in runs)
 	return [{'actions': list(route), 'runs': count} for route, count in counts.most_common()]
@@ -547,11 +638,16 @@ def main() -> None:
 	parser.add_argument('capture_root', type=Path)
 	parser.add_argument('output', type=Path)
 	parser.add_argument('--task-fingerprint')
+	parser.add_argument(
+		'--procedure-task-fingerprint',
+		help='Override only the emitted identity, for migrating captures made with a legacy fingerprint algorithm',
+	)
 	parser.add_argument('--minimum-successful-runs', type=int, default=2)
 	args = parser.parse_args()
 	procedure = compile_procedure(
 		args.capture_root,
 		task_fingerprint=args.task_fingerprint,
+		procedure_task_fingerprint=args.procedure_task_fingerprint,
 		minimum_successful_runs=args.minimum_successful_runs,
 	)
 	path = procedure.write(args.output)

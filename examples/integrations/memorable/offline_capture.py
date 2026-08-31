@@ -50,6 +50,13 @@ SECRET_PATTERN = re.compile(
 DYNAMIC_IDENTIFIER_PATTERN = re.compile(r'(?:^|[-_])[a-f0-9]{8,}(?:$|[-_])', re.IGNORECASE)
 
 
+def canonical_task_fingerprint(task: str) -> str:
+	"""Return the stable task identity shared by capture and replay adapters."""
+
+	normalized = ' '.join(task.split()).casefold()
+	return hashlib.sha256(normalized.encode()).hexdigest()
+
+
 class OfflineCaptureOptions(BaseModel):
 	"""Controls which private artifacts are retained for one run."""
 
@@ -848,7 +855,7 @@ class OfflineRunCapture:
 		return {
 			'schema_version': CAPTURE_SCHEMA_VERSION,
 			'run_id': self.run_id,
-			'task_fingerprint': hashlib.sha256((getattr(self._agent, 'task', '') or '').strip().encode()).hexdigest()[:16],
+			'task_fingerprint': canonical_task_fingerprint(getattr(self._agent, 'task', '') or ''),
 			'route_signature': route,
 			'route_hash': hashlib.sha256(json.dumps(route).encode()).hexdigest()[:16],
 			'run_outcome': self._terminal_record(history),

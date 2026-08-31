@@ -28,7 +28,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from browser_use import Agent, BrowserProfile, BrowserSession, ChatAnthropic, ChatBrowserUse, ChatGoogle, ChatOpenAI
 from browser_use.browser.profile import ViewportSize
-from examples.integrations.memorable.offline_capture import OfflineCaptureOptions, OfflineRunCapture
+from examples.integrations.memorable.offline_capture import (
+	OfflineCaptureOptions,
+	OfflineRunCapture,
+	canonical_task_fingerprint,
+)
 from examples.integrations.memorable.procedure import BrowserProcedure
 from examples.integrations.memorable.replay import DeterministicReplayer, ReplayOptions, ReplayStatus
 
@@ -122,8 +126,7 @@ def load_task(benchmark_root: Path, task_index: int) -> BenchmarkTask:
 
 
 def task_fingerprint(task: BenchmarkTask) -> str:
-	normalized = ' '.join(task.confirmed_task.split()).casefold()
-	return hashlib.sha256(normalized.encode()).hexdigest()
+	return canonical_task_fingerprint(task.confirmed_task)
 
 
 def start_url(task: BenchmarkTask) -> str:

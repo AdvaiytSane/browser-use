@@ -20,6 +20,7 @@ from browser_use import BrowserProfile, BrowserSession, Tools
 from browser_use.browser.profile import ViewportSize
 from browser_use.browser.views import BrowserStateSummary
 from browser_use.dom.views import EnhancedDOMTreeNode
+from browser_use.filesystem.file_system import FileSystem
 from examples.integrations.memorable.procedure import (
 	BrowserProcedure,
 	PostconditionKind,
@@ -190,6 +191,7 @@ class DeterministicReplayer:
 		self.tools = tools or Tools()
 		self.resolver = SemanticResolver()
 		self.action_model = self.tools.registry.create_action_model(include_actions=[action.value for action in ReplayAction])
+		self.file_system: FileSystem | None = None
 
 	async def run(self, browser_session: BrowserSession, parameters: dict[str, str]) -> ReplayReport:
 		"""Replay against an already-navigated browser session."""
@@ -205,6 +207,7 @@ class DeterministicReplayer:
 				initial_url='',
 				reason=f'{REPLAY_KILL_SWITCH} is disabled; no browser state was read and no audit files were written',
 			)
+		self.file_system = FileSystem(self.options.output_dir / 'filesystem', create_default_files=False)
 
 		run_id = uuid7str()
 		started_at = _utc_now()
@@ -265,6 +268,7 @@ class DeterministicReplayer:
 				if preverification.verified and step.postcondition.kind in {
 					PostconditionKind.CONTROL_VALUE_EQUALS,
 					PostconditionKind.CONTROL_CHECKED_EQUALS,
+					PostconditionKind.CONTROL_FILES_SELECTED,
 				}:
 					events.append(
 						ReplayEvent(
@@ -291,6 +295,8 @@ class DeterministicReplayer:
 				result = await self.tools.act(
 					action,
 					browser_session,
+					available_file_paths=self._available_file_paths(parameters),
+					file_system=self.file_system,
 					action_timeout=self.options.action_timeout_seconds,
 				)
 				result_summary = _action_result_summary(result)
@@ -376,7 +382,22 @@ class DeterministicReplayer:
 			return f'required runtime parameters are empty: {empty}'
 		if extra:
 			return f'unknown runtime parameters: {extra}'
+		for parameter in self.procedure.parameters:
+			if parameter.kind.value != 'file' or parameter.name not in parameters:
+				continue
+			path = Path(parameters[parameter.name]).expanduser()
+			if not path.is_file():
+				return f'file parameter {parameter.name!r} does not exist or is not a file'
+			if path.stat().st_size == 0:
+				return f'file parameter {parameter.name!r} is empty'
 		return None
+
+	def _available_file_paths(self, parameters: dict[str, str]) -> list[str]:
+		return [
+			parameters[parameter.name]
+			for parameter in self.procedure.parameters
+			if parameter.kind.value == 'file' and parameter.name in parameters
+		]
 
 	async def _wait_for_optional(
 		self, browser_session: BrowserSession, step: ProcedureStep
@@ -411,6 +432,13 @@ class DeterministicReplayer:
 				'select_dropdown': {
 					'index': selector_index,
 					'text': _binding_value(step.value, parameters),
+				}
+			}
+		if step.action == ReplayAction.UPLOAD_FILE:
+			return {
+				'upload_file': {
+					'index': selector_index,
+					'path': _binding_value(step.value, parameters),
 				}
 			}
 		return {'click': {'index': selector_index}}
@@ -475,9 +503,17 @@ class DeterministicReplayer:
 					'provenance': 'browser-native form control state',
 				},
 			)
-		expected = _binding_value(postcondition.value, parameters)
 		control = controls[0]
-		if postcondition.kind == PostconditionKind.CONTROL_CHECKED_EQUALS:
+		if postcondition.kind == PostconditionKind.CONTROL_FILES_SELECTED:
+			observed_count = int(control.get('file_count') or 0)
+			verified = observed_count > 0
+			evidence = {
+				'live_control_match_count': 1,
+				'observed_file_count': observed_count,
+				'provenance': 'browser-native files.length property',
+			}
+		elif postcondition.kind == PostconditionKind.CONTROL_CHECKED_EQUALS:
+			expected = _binding_value(postcondition.value, parameters)
 			observed = bool(control.get('checked'))
 			verified = observed is bool(expected)
 			evidence = {
@@ -487,6 +523,7 @@ class DeterministicReplayer:
 				'provenance': 'browser-native checked property',
 			}
 		else:
+			expected = _binding_value(postcondition.value, parameters)
 			observed_value = str(control.get('value') or '')
 			expected_value = str(expected)
 			verified = observed_value == expected_value
@@ -580,6 +617,8 @@ def _not_actionable_reason(candidate: CandidateSnapshot, action: ReplayAction) -
 		return f'unique target is incompatible with input: {node_name or "unknown"}/{input_type or "default"}'
 	if action == ReplayAction.SELECT_DROPDOWN and node_name != 'select':
 		return f'unique target is incompatible with select_dropdown: {node_name or "unknown"}'
+	if action == ReplayAction.UPLOAD_FILE and (node_name != 'input' or input_type != 'file'):
+		return f'unique target is incompatible with upload_file: {node_name or "unknown"}/{input_type or "default"}'
 	return None
 
 
@@ -604,12 +643,14 @@ async def _read_live_page(browser_session: BrowserSession) -> dict[str, Any] | N
 					attributes: {
 						name: element.getAttribute('name'),
 						type: element.getAttribute('type'),
+						value: element.getAttribute('value'),
 						autocomplete: element.getAttribute('autocomplete'),
 						'aria-label': element.getAttribute('aria-label'),
 						placeholder: element.getAttribute('placeholder'),
 						'data-action': element.getAttribute('data-action')
 					},
 					value: 'value' in element ? element.value : null,
+					file_count: 'files' in element && element.files ? element.files.length : null,
 					checked: 'checked' in element ? element.checked : null,
 					disabled: 'disabled' in element ? element.disabled : null,
 					hidden: element.hidden
