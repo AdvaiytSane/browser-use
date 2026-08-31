@@ -184,6 +184,9 @@ class DeterministicReplayer:
 	):
 		self.procedure = procedure
 		self.options = options
+		# Deterministic replay should contact the target site, not an observability service.
+		os.environ.setdefault('ANONYMIZED_TELEMETRY', 'false')
+		os.environ.setdefault('BROWSER_USE_CLOUD_SYNC', 'false')
 		self.tools = tools or Tools()
 		self.resolver = SemanticResolver()
 		self.action_model = self.tools.registry.create_action_model(include_actions=[action.value for action in ReplayAction])
@@ -673,6 +676,7 @@ def _write_audit_bundle(
 			'tier': 'private_local_audit',
 			'runtime_parameter_values_retained': False,
 			'action_result_content_retained': False,
+			'browser_use_telemetry': 'defaulted_off_unless_caller_preconfigured_otherwise',
 		},
 		'artifacts': [
 			{
