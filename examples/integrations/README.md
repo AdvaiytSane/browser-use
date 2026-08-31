@@ -19,6 +19,10 @@ This directory is for examples that show Browser Use working with external produ
 - Prefer `ChatBrowserUse()` unless the example is specifically about another model.
 - Include the command that runs the example from the repository root.
 
+## Runnable integrations
+
+- [Memorable offline run capture](memorable/README.md) records high-fidelity agent runs for local procedure mining and adaptive replay experiments.
+
 ## Community integrations
 
 External projects listed here are maintained outside this repository. A listing is a pointer for users, not a support guarantee from Browser Use maintainers.

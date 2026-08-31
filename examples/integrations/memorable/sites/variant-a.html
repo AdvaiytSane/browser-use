@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Signup workflow A</title>
+  <style>
+    body { font-family: system-ui; max-width: 680px; margin: 40px auto; padding: 16px; }
+    label { display: block; margin: 14px 0; }
+    input, select, button { font: inherit; padding: 9px; }
+    .step[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main aria-label="Registration workflow">
+    <h1>Create an account</h1>
+    <form id="registration">
+      <section id="identity-step" class="step" aria-labelledby="identity-heading">
+        <h2 id="identity-heading">Identity</h2>
+        <label for="full-name">Full name</label>
+        <input id="full-name" name="fullName" autocomplete="name" required>
+        <label for="email">Email address</label>
+        <input id="email" name="email" type="email" autocomplete="email" required>
+        <button id="continue-button" type="button">Continue</button>
+      </section>
+      <section id="preferences-step" class="step" aria-labelledby="preferences-heading" hidden>
+        <h2 id="preferences-heading">Preferences</h2>
+        <label for="country">Country</label>
+        <select id="country" name="country" required>
+          <option value="">Choose a country</option>
+          <option>Canada</option>
+          <option>United States</option>
+          <option>United Kingdom</option>
+        </select>
+        <label><input name="terms" type="checkbox" required> Accept terms</label>
+        <button id="submit-button" type="submit">Submit registration</button>
+      </section>
+    </form>
+    <p id="success" role="status" hidden>Registration complete. Success code: MEM-042</p>
+  </main>
+  <script>
+    const form = document.querySelector('#registration');
+    document.querySelector('#continue-button').addEventListener('click', () => {
+      if (!form.fullName.value || !form.email.checkValidity()) { form.reportValidity(); return; }
+      document.querySelector('#identity-step').hidden = true;
+      document.querySelector('#preferences-step').hidden = false;
+      document.querySelector('h1').textContent = 'Review preferences';
+    });
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!form.checkValidity()) { form.reportValidity(); return; }
+      form.hidden = true;
+      document.querySelector('h1').textContent = 'Complete';
+      document.querySelector('#success').hidden = false;
+    });
+  </script>
+</body>
+</html>

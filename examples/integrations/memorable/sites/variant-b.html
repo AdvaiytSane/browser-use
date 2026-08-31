@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Signup workflow B</title>
+  <style>
+    body { font-family: system-ui; margin: 0; background: #f4f5f7; }
+    main { max-width: 720px; margin: 28px auto; background: white; padding: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    label { display: block; margin: 10px 0; }
+    input, select, button { font: inherit; padding: 9px; }
+    .notice { position: fixed; inset: auto 12px 12px 12px; background: #172033; color: white; padding: 14px; z-index: 9; }
+    @media (max-width: 540px) { .grid { grid-template-columns: 1fr; } main { margin: 0; } }
+  </style>
+</head>
+<body>
+  <aside class="notice" role="dialog" aria-label="Privacy notice">
+    This local demo uses no tracking cookies.
+    <button type="button" aria-label="Dismiss notice">Dismiss</button>
+  </aside>
+  <main aria-label="Registration workflow">
+    <header><h1>Account registration</h1><p>All fields are required.</p></header>
+    <form data-flow="registration">
+      <div class="grid">
+        <section aria-labelledby="contact-heading">
+          <h2 id="contact-heading">Contact</h2>
+          <label data-for-field="email">Email address</label>
+          <input data-field="email" name="email" type="email" autocomplete="email" required>
+          <label data-for-field="fullName">Full name</label>
+          <input data-field="fullName" name="fullName" autocomplete="name" required>
+        </section>
+        <section aria-labelledby="locale-heading">
+          <h2 id="locale-heading">Locale and consent</h2>
+          <label data-for-field="country">Country</label>
+          <select data-field="country" name="country" required>
+            <option value="">Select</option>
+            <option>United States</option>
+            <option>Canada</option>
+            <option>United Kingdom</option>
+          </select>
+          <label>
+            <input data-field="terms" name="terms" type="checkbox" required>
+            Accept terms
+          </label>
+        </section>
+      </div>
+      <button type="submit" data-action="finish">Finish registration</button>
+    </form>
+    <p data-state="success" role="status" hidden>Registration complete. Success code: MEM-042</p>
+  </main>
+  <script>
+    const randomId = () => {
+      const bytes = new Uint8Array(4);
+      crypto.getRandomValues(bytes);
+      return `field-${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+    };
+    document.querySelectorAll('[data-field]').forEach(control => {
+      control.id = randomId();
+      const label = document.querySelector(`[data-for-field="${control.dataset.field}"]`);
+      if (label) label.htmlFor = control.id;
+    });
+    const params = new URLSearchParams(location.search);
+    if (params.get('notice') === '0') document.querySelector('.notice').remove();
+    document.querySelector('[aria-label="Dismiss notice"]')?.addEventListener('click', event => {
+      event.currentTarget.closest('.notice').remove();
+    });
+    const form = document.querySelector('form');
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!form.checkValidity()) { form.reportValidity(); return; }
+      const requestedDelay = Number(params.get('delay'));
+      const delay = Number.isFinite(requestedDelay) && requestedDelay >= 0
+        ? requestedDelay
+        : 200 + crypto.getRandomValues(new Uint16Array(1))[0] % 601;
+      setTimeout(() => {
+        form.hidden = true;
+        document.querySelector('h1').textContent = 'Complete';
+        document.querySelector('[data-state="success"]').hidden = false;
+      }, delay);
+    });
+  </script>
+</body>
+</html>
