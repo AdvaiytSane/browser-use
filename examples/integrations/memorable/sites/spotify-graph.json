@@ -1,0 +1,239 @@
+{
+  "schema_version": "0.1.0",
+  "graph_id": "865f92c01645d6d406cb",
+  "entry_node": "spotify_home",
+  "parameters": [
+    "artist",
+    "track_rank"
+  ],
+  "nodes": [
+    {
+      "id": "spotify_home",
+      "description": "Spotify is open and the artist search control is available.",
+      "keywords": [
+        "spotify",
+        "home",
+        "search"
+      ],
+      "terminal": false,
+      "required_parameters": [],
+      "state_guard": "unique search combobox"
+    },
+    {
+      "id": "search_results",
+      "description": "Search results for the requested artist are visible.",
+      "keywords": [
+        "search",
+        "results",
+        "artist"
+      ],
+      "terminal": false,
+      "required_parameters": [
+        "artist"
+      ],
+      "state_guard": "URL path starts /search/ and Top result region exists"
+    },
+    {
+      "id": "canonical_artist",
+      "description": "Open the verified canonical artist result and stop on its artist page.",
+      "keywords": [
+        "open",
+        "verified",
+        "canonical",
+        "artist",
+        "result",
+        "page",
+        "stop"
+      ],
+      "terminal": true,
+      "required_parameters": [
+        "artist"
+      ],
+      "state_guard": "canonical /artist/ URL and exact artist heading and Popular section"
+    },
+    {
+      "id": "popular_track",
+      "description": "Identify a ranked visible track in the artist Popular section.",
+      "keywords": [
+        "identify",
+        "find",
+        "get",
+        "track",
+        "song",
+        "popular",
+        "first",
+        "second",
+        "third"
+      ],
+      "terminal": true,
+      "required_parameters": [
+        "artist",
+        "track_rank"
+      ],
+      "state_guard": "ordered unique /track/ links under exact Popular heading"
+    }
+  ],
+  "edges": [
+    {
+      "id": "search_artist",
+      "source": "spotify_home",
+      "target": "search_results",
+      "action": "input",
+      "locator": {
+        "fixed": {
+          "node_name": "input",
+          "ax_role": "combobox",
+          "ax_name": "what do you want to play?",
+          "attributes.type": "search",
+          "attributes.data-testid": "search-input"
+        },
+        "dynamic": {},
+        "href_prefix": null,
+        "ancestor_role": null,
+        "ancestor_name": null
+      },
+      "value_from": "artist",
+      "postcondition": "search URL contains encoded artist and Top result region exists"
+    },
+    {
+      "id": "open_canonical_artist",
+      "source": "search_results",
+      "target": "canonical_artist",
+      "action": "click",
+      "locator": {
+        "fixed": {
+          "node_name": "a",
+          "ax_role": "link"
+        },
+        "dynamic": {
+          "ax_name": "artist"
+        },
+        "href_prefix": "/artist/",
+        "ancestor_role": "region",
+        "ancestor_name": "top result"
+      },
+      "value_from": null,
+      "postcondition": "canonical /artist/ URL + exact artist heading + Popular heading"
+    },
+    {
+      "id": "read_ranked_popular_track",
+      "source": "canonical_artist",
+      "target": "popular_track",
+      "action": "extract_ranked",
+      "locator": null,
+      "value_from": "track_rank",
+      "postcondition": "requested rank resolves to one visible /track/ link under Popular"
+    }
+  ],
+  "training": {
+    "trace_count": 3,
+    "distinct_artists": 3,
+    "artists": [
+      "Björk",
+      "Daft Punk",
+      "Radiohead"
+    ],
+    "model_calls": 0,
+    "compiler": "deterministic_parameterized_graph_aggregation",
+    "verified_predicate": "exact_name + canonical_artist_url + artist_heading + popular_section",
+    "captured_values_used_as_runtime_locators": false,
+    "samples": [
+      {
+        "artist": "Björk",
+        "terminal_node": "popular_track",
+        "artist_url": "https://open.spotify.com/artist/7w29UYBi0qsHi5RTcv3lmA",
+        "popular_tracks": [
+          {
+            "rank": 1,
+            "name": "Berghain",
+            "url": "https://open.spotify.com/track/2T8yuUKl1nhmtaIocqWo4i"
+          },
+          {
+            "rank": 2,
+            "name": "Army of Me",
+            "url": "https://open.spotify.com/track/3vEmpJQC2p8h0U3OiBufQm"
+          },
+          {
+            "rank": 3,
+            "name": "Berghain - Remix",
+            "url": "https://open.spotify.com/track/7CI5IAi2z70tyJIVXxsHfw"
+          },
+          {
+            "rank": 4,
+            "name": "Venus as a Boy",
+            "url": "https://open.spotify.com/track/5G9LvzXcBoIBXOd2jzdJTs"
+          },
+          {
+            "rank": 5,
+            "name": "Big Time Sensuality",
+            "url": "https://open.spotify.com/track/0X0LTI0MQG9S3FLSUvjrj5"
+          }
+        ]
+      },
+      {
+        "artist": "Daft Punk",
+        "terminal_node": "popular_track",
+        "artist_url": "https://open.spotify.com/artist/4tZwfgrHOc3mvqYlEYSvVi",
+        "popular_tracks": [
+          {
+            "rank": 1,
+            "name": "One More Time",
+            "url": "https://open.spotify.com/track/0DiWol3AO6WpXZgp0goxAV"
+          },
+          {
+            "rank": 2,
+            "name": "Get Lucky (Radio Edit) [feat. Pharrell Williams and Nile Rodgers]",
+            "url": "https://open.spotify.com/track/2Foc5Q5nqNiosCNqttzHof"
+          },
+          {
+            "rank": 3,
+            "name": "Instant Crush (feat. Julian Casablancas)",
+            "url": "https://open.spotify.com/track/2cGxRwrMyEAp8dEbuZaVv6"
+          },
+          {
+            "rank": 4,
+            "name": "Get Lucky (feat. Pharrell Williams and Nile Rodgers)",
+            "url": "https://open.spotify.com/track/69kOkLUCkxIZYexIgSG8rq"
+          },
+          {
+            "rank": 5,
+            "name": "Around the World",
+            "url": "https://open.spotify.com/track/1pKYYY0dkg23sQQXi0Q5zN"
+          }
+        ]
+      },
+      {
+        "artist": "Radiohead",
+        "terminal_node": "canonical_artist",
+        "artist_url": "https://open.spotify.com/artist/4Z8W4fKeB5YxbusRsdQVPb",
+        "popular_tracks": [
+          {
+            "rank": 1,
+            "name": "Creep",
+            "url": "https://open.spotify.com/track/70LcF31zb1H0PyJoS1Sx1r"
+          },
+          {
+            "rank": 2,
+            "name": "Let Down",
+            "url": "https://open.spotify.com/track/2fuYa3Lx06QQJAm0MjztKr"
+          },
+          {
+            "rank": 3,
+            "name": "No Surprises",
+            "url": "https://open.spotify.com/track/10nyNJ6zNy2YVYLrcwLccB"
+          },
+          {
+            "rank": 4,
+            "name": "All I Need",
+            "url": "https://open.spotify.com/track/5Qv2Nby1xTr9pQyjkrc94J"
+          },
+          {
+            "rank": 5,
+            "name": "Karma Police",
+            "url": "https://open.spotify.com/track/63OQupATfueTdZMWTxW03A"
+          }
+        ]
+      }
+    ]
+  }
+}

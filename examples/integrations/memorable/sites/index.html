@@ -161,6 +161,46 @@
       </aside>
     </section>
 
+    <section class="spotify-lab" aria-labelledby="spotify-title">
+      <div class="spotify-copy">
+        <p class="eyebrow">Live public-site proof</p>
+        <h2 id="spotify-title">One graph. Any artist. Task-chosen stopping point.</h2>
+        <p>
+          Three verified Spotify runs compile into parameterized nodes—not artist-specific scripts.
+          The task binds <code>artist</code> and optional <code>track_rank</code>, then retrieves only
+          the path needed to satisfy it.
+        </p>
+        <form id="spotify-task-form">
+          <label for="spotify-task">Agent task</label>
+          <textarea id="spotify-task" rows="3">Search for “Daft Punk,” open the verified artist result, and identify the first visible track under Popular.</textarea>
+          <div class="spotify-presets">
+            <button type="button" data-task="Open the verified artist result for Radiohead and stop there">Stop at artist</button>
+            <button type="button" data-task="Search Spotify for Björk and identify the third popular track">Third track</button>
+            <button type="submit">Retrieve graph path</button>
+          </div>
+        </form>
+        <div id="spotify-binding" class="spotify-binding" aria-live="polite">
+          <span><small>artist</small><strong>Daft Punk</strong></span>
+          <span><small>track_rank</small><strong>1</strong></span>
+          <span><small>model calls</small><strong>0</strong></span>
+        </div>
+      </div>
+
+      <div class="graph-card">
+        <div class="graph-meta">
+          <span>spotify-graph.json</span>
+          <span id="spotify-corpus">loading evidence…</span>
+        </div>
+        <div id="spotify-graph" class="graph-flow" aria-label="Retrieved Spotify graph path"></div>
+        <div id="spotify-result" class="graph-result">Loading the compiled graph…</div>
+        <p class="graph-note">
+          “Verified” here is an evidence predicate: exact requested name in Spotify's Top Result,
+          canonical <code>/artist/</code> URL, exact artist-page heading, and a Popular section.
+          Spotify exposed no reliable verified badge in the observed public DOM.
+        </p>
+      </div>
+    </section>
+
     <section class="explanation-row">
       <div><span>01</span><p><strong>Remember semantics</strong>Role, accessible name, stable attributes, and observed outcomes become the procedure.</p></div>
       <div><span>02</span><p><strong>Rebind locally</strong>The current page supplies a fresh target and fresh coordinates at execution time.</p></div>

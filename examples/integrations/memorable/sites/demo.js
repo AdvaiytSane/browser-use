@@ -374,3 +374,108 @@ fetch("demo-procedure.json")
   });
 
 resetAudit();
+
+const spotifyUi = {
+  form: document.querySelector("#spotify-task-form"),
+  task: document.querySelector("#spotify-task"),
+  graph: document.querySelector("#spotify-graph"),
+  binding: document.querySelector("#spotify-binding"),
+  result: document.querySelector("#spotify-result"),
+  corpus: document.querySelector("#spotify-corpus"),
+};
+let spotifyGraph;
+
+function spotifyIntent(task) {
+  const quoted = task.match(/[“"]([^”"]+)[”"]/);
+  const patterns = [
+    /(?:search(?:\s+spotify)?\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
+    /(?:artist\s+result\s+for|artist\s+page\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
+  ];
+  const match = quoted || patterns.map((pattern) => task.match(pattern)).find(Boolean);
+  const artist = (match?.[1] || "").trim().replace(/^[“”"'\s]+|[“”"'.,;:!?\s]+$/g, "");
+  const lowered = task.toLowerCase();
+  const rankWords = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5 };
+  const trackIntent = /\b(track|song|popular|first|second|third|fourth|fifth)\b/.test(lowered);
+  const rankEntry = Object.entries(rankWords).find(([word]) => new RegExp(`\\b${word}\\b`).test(lowered));
+  const numericRank = lowered.match(/\b(\d{1,2})(?:[a-z]{2})?\s+(?:visible\s+)?(?:track|song)\b/);
+  return {
+    artist,
+    terminal: trackIntent ? "popular_track" : "canonical_artist",
+    rank: trackIntent ? (rankEntry?.[1] || Number(numericRank?.[1]) || 1) : null,
+  };
+}
+
+function renderSpotifyTask() {
+  if (!spotifyGraph) return;
+  const intent = spotifyIntent(spotifyUi.task.value);
+  const activeNodes = intent.terminal === "popular_track"
+    ? ["spotify_home", "search_results", "canonical_artist", "popular_track"]
+    : ["spotify_home", "search_results", "canonical_artist"];
+  spotifyUi.graph.replaceChildren();
+  spotifyGraph.nodes.forEach((node, index) => {
+    if (index > 0) {
+      const connector = document.createElement("span");
+      connector.className = `graph-arrow ${activeNodes.includes(node.id) ? "active" : ""}`;
+      connector.textContent = "→";
+      spotifyUi.graph.append(connector);
+    }
+    const card = document.createElement("div");
+    card.className = `graph-node ${activeNodes.includes(node.id) ? "active" : "inactive"} ${node.id === intent.terminal ? "terminal" : ""}`;
+    const id = document.createElement("code");
+    id.textContent = node.id;
+    const label = document.createElement("span");
+    label.textContent = node.id === intent.terminal ? "task terminal" : node.state_guard;
+    card.append(id, label);
+    spotifyUi.graph.append(card);
+  });
+  const values = [
+    ["artist", intent.artist || "unbound"],
+    ["track_rank", intent.rank ?? "not needed"],
+    ["model calls", "0"],
+  ];
+  spotifyUi.binding.replaceChildren(...values.map(([label, value]) => {
+    const item = document.createElement("span");
+    const small = document.createElement("small");
+    small.textContent = label;
+    const strong = document.createElement("strong");
+    strong.textContent = String(value);
+    item.append(small, strong);
+    return item;
+  }));
+  const sample = spotifyGraph.training.samples?.find((item) => normalize(item.artist) === normalize(intent.artist));
+  if (!intent.artist) {
+    spotifyUi.result.textContent = "Artist binding failed. The executor would refuse before opening Spotify.";
+    spotifyUi.result.className = "graph-result refused";
+  } else if (intent.terminal === "canonical_artist") {
+    spotifyUi.result.textContent = sample
+      ? `Recorded proof: stopped on ${sample.artist}'s canonical artist page.`
+      : `Runtime plan: open ${intent.artist}'s canonical artist page, verify it, then stop.`;
+    spotifyUi.result.className = "graph-result completed";
+  } else {
+    const track = sample?.popular_tracks?.[intent.rank - 1];
+    spotifyUi.result.textContent = track
+      ? `Recorded proof: Popular #${intent.rank} for ${sample.artist} was “${track.name}”.`
+      : `Runtime plan: bind ${intent.artist}, verify its artist page, then read Popular #${intent.rank}.`;
+    spotifyUi.result.className = "graph-result completed";
+  }
+}
+
+spotifyUi.form.addEventListener("submit", (event) => { event.preventDefault(); renderSpotifyTask(); });
+document.querySelectorAll("[data-task]").forEach((button) => {
+  button.addEventListener("click", () => { spotifyUi.task.value = button.dataset.task; renderSpotifyTask(); });
+});
+
+fetch("spotify-graph.json")
+  .then((response) => {
+    if (!response.ok) throw new Error("The Spotify graph could not be loaded.");
+    return response.json();
+  })
+  .then((graph) => {
+    spotifyGraph = graph;
+    spotifyUi.corpus.textContent = `${graph.training.trace_count} live traces · ${graph.training.distinct_artists} artists · ${graph.training.model_calls} model calls`;
+    renderSpotifyTask();
+  })
+  .catch((error) => {
+    spotifyUi.result.textContent = error.message;
+    spotifyUi.result.className = "graph-result refused";
+  });
