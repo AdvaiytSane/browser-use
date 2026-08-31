@@ -390,6 +390,7 @@ function spotifyIntent(task) {
   const patterns = [
     /(?:search(?:\s+spotify)?\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
     /(?:artist\s+result\s+for|artist\s+page\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
+    /(?:navigate|go|open)(?:\s+spotify)?\s+to\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
   ];
   const match = quoted || patterns.map((pattern) => task.match(pattern)).find(Boolean);
   const artist = (match?.[1] || "").trim().replace(/^[“”"'\s]+|[“”"'.,;:!?\s]+$/g, "");
@@ -460,7 +461,49 @@ function renderSpotifyTask() {
   }
 }
 
-spotifyUi.form.addEventListener("submit", (event) => { event.preventDefault(); renderSpotifyTask(); });
+async function runSpotifyLive(event) {
+  event.preventDefault();
+  renderSpotifyTask();
+  const intent = spotifyIntent(spotifyUi.task.value);
+  if (!intent.artist) return;
+  const runButton = spotifyUi.form.querySelector('button[type="submit"]');
+  runButton.disabled = true;
+  runButton.textContent = "Running in visible Chromium…";
+  spotifyUi.result.textContent = "Opening Spotify in a separate Chromium window and rebinding against its live DOM…";
+  spotifyUi.result.className = "graph-result running";
+  try {
+    const response = await fetch("/api/spotify/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task: spotifyUi.task.value }),
+    });
+    const body = await response.text();
+    let payload;
+    try { payload = JSON.parse(body); } catch { payload = null; }
+    if (!response.ok || !payload) {
+      if (response.status === 501 || !payload) {
+        throw new Error("The dashboard is using the static server. Start spotify_demo_server.py instead of python -m http.server.");
+      }
+      throw new Error(payload.detail || payload.reason || "The semantic executor stopped for recovery.");
+    }
+    if (payload.status !== "completed") {
+      throw new Error(payload.reason || "The semantic executor stopped for recovery.");
+    }
+    const result = payload.track
+      ? `Completed live: ${payload.intent.artist} · Popular #${payload.track.rank} · “${payload.track.name}”.`
+      : `Completed live: opened and verified ${payload.intent.artist}, then stopped as requested.`;
+    spotifyUi.result.textContent = `${result} The visible browser made ${payload.model_calls} model calls.`;
+    spotifyUi.result.className = "graph-result completed";
+  } catch (error) {
+    spotifyUi.result.textContent = error instanceof Error ? error.message : "The live run failed.";
+    spotifyUi.result.className = "graph-result refused";
+  } finally {
+    runButton.disabled = false;
+    runButton.textContent = "Run live on Spotify";
+  }
+}
+
+spotifyUi.form.addEventListener("submit", runSpotifyLive);
 document.querySelectorAll("[data-task]").forEach((button) => {
   button.addEventListener("click", () => { spotifyUi.task.value = button.dataset.task; renderSpotifyTask(); });
 });

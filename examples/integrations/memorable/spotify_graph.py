@@ -239,6 +239,7 @@ class SpotifyTaskRouter:
 		patterns = (
 			r'(?:search(?:\s+spotify)?\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)',
 			r'(?:artist\s+result\s+for|artist\s+page\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)',
+			r'(?:navigate|go|open)(?:\s+spotify)?\s+to\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)',
 		)
 		for pattern in patterns:
 			match = re.search(pattern, task, flags=re.IGNORECASE)
@@ -434,7 +435,7 @@ class SpotifyGraphExecutor:
 					)
 				)
 			elif edge.action == GraphAction.CLICK:
-				resolved = await self._wait_for_resolution(browser_session, edge.locator, {'artist': intent.artist})
+				resolved = await self._wait_for_resolution(browser_session, edge.locator, {'artist': intent.artist}, timeout=15)
 				resolution = resolved[1] if resolved else []
 				if len(resolution) != 1:
 					return self._refuse(report, edge, f'canonical artist result resolved to {len(resolution)} candidates')
@@ -650,27 +651,57 @@ class SpotifyGraphExecutor:
 		return path
 
 
-async def _main_async(args: argparse.Namespace) -> int:
-	graph = SpotifyProcedureGraph.read(args.graph) if args.graph else spotify_graph_template()
+async def run_spotify_task(
+	task: str,
+	*,
+	graph: SpotifyProcedureGraph | None = None,
+	trace_dir: Path | None = None,
+	artist: str | None = None,
+	track_rank: int | None = None,
+	headless: bool = True,
+	viewport_width: int = 1280,
+	viewport_height: int = 800,
+	linger_seconds: float = 0,
+) -> SpotifyGraphReport:
+	"""Run one graph task in a fresh Browser Use Chromium session."""
+	procedure_graph = graph or spotify_graph_template()
 	profile = BrowserProfile(
-		headless=args.headless,
+		headless=headless,
 		user_data_dir=None,
-		window_size=ViewportSize(width=args.viewport_width, height=args.viewport_height),
+		window_size=ViewportSize(width=viewport_width, height=viewport_height),
 	)
 	browser_session = BrowserSession(browser_profile=profile)
 	await browser_session.start()
 	try:
 		await browser_session.navigate_to(SPOTIFY_ORIGIN)
-		report = await SpotifyGraphExecutor(graph, trace_dir=args.trace_dir).run(
+		report = await SpotifyGraphExecutor(procedure_graph, trace_dir=trace_dir).run(
 			browser_session,
-			args.task,
-			artist=args.artist,
-			track_rank=args.track_rank,
+			task,
+			artist=artist,
+			track_rank=track_rank,
 		)
-		print(report.model_dump_json(indent=2))
-		return 0 if report.status == 'completed' else 2
+		if linger_seconds > 0:
+			await asyncio.sleep(linger_seconds)
+		return report
 	finally:
 		await browser_session.kill()
+
+
+async def _main_async(args: argparse.Namespace) -> int:
+	graph = SpotifyProcedureGraph.read(args.graph) if args.graph else spotify_graph_template()
+	report = await run_spotify_task(
+		args.task,
+		graph=graph,
+		trace_dir=args.trace_dir,
+		artist=args.artist,
+		track_rank=args.track_rank,
+		headless=args.headless,
+		viewport_width=args.viewport_width,
+		viewport_height=args.viewport_height,
+		linger_seconds=args.linger_seconds,
+	)
+	print(report.model_dump_json(indent=2))
+	return 0 if report.status == 'completed' else 2
 
 
 def main() -> None:
@@ -684,6 +715,7 @@ def main() -> None:
 	parser.add_argument('--trace-dir', type=Path, default=Path('./tmp/spotify-traces'))
 	parser.add_argument('--viewport-width', type=int, default=1280)
 	parser.add_argument('--viewport-height', type=int, default=800)
+	parser.add_argument('--linger-seconds', type=float, default=0)
 	parser.add_argument('--headless', action=argparse.BooleanOptionalAction, default=True)
 	args = parser.parse_args()
 	if args.compile_traces:

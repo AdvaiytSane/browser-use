@@ -229,6 +229,7 @@ h1 span { color: var(--muted); }
 .graph-arrow.active { color: var(--mint); }
 .graph-result { padding: 13px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: rgba(0,0,0,.18); font-size: 11px; line-height: 1.45; }
 .graph-result.completed { color: var(--mint); border-color: rgba(120,240,177,.26); }
+.graph-result.running { color: var(--amber); border-color: rgba(255,199,96,.35); }
 .graph-result.refused { color: var(--red); border-color: rgba(255,114,95,.35); }
 .graph-note { margin: 15px 0 0; color: var(--dim); font-size: 9px; line-height: 1.55; }
 

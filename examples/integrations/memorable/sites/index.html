@@ -176,7 +176,7 @@
           <div class="spotify-presets">
             <button type="button" data-task="Open the verified artist result for Radiohead and stop there">Stop at artist</button>
             <button type="button" data-task="Search Spotify for Björk and identify the third popular track">Third track</button>
-            <button type="submit">Retrieve graph path</button>
+            <button type="submit">Run live on Spotify</button>
           </div>
         </form>
         <div id="spotify-binding" class="spotify-binding" aria-live="polite">
@@ -194,6 +194,8 @@
         <div id="spotify-graph" class="graph-flow" aria-label="Retrieved Spotify graph path"></div>
         <div id="spotify-result" class="graph-result">Loading the compiled graph…</div>
         <p class="graph-note">
+          A visible Chromium window opens outside this dashboard during a live run. Playback and account mutations are intentionally disabled.
+          <br>
           “Verified” here is an evidence predicate: exact requested name in Spotify's Top Result,
           canonical <code>/artist/</code> URL, exact artist-page heading, and a Popular section.
           Spotify exposed no reliable verified badge in the observed public DOM.

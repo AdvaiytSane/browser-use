@@ -4,10 +4,10 @@ This prototype records a Browser Use agent run into a local, self-describing bun
 
 ## Open the Replay Lab
 
-Start the local fixture server from the repository root:
+Start the loopback demo server from the repository root:
 
 ```bash
-uv run python -m http.server 8765 --directory examples/integrations/memorable/sites
+uv run python examples/integrations/memorable/spotify_demo_server.py --no-headless
 ```
 
 Then open `http://127.0.0.1:8765/`. The dashboard runs the compiled registration procedure against three live browser scenarios:
@@ -17,6 +17,8 @@ Then open `http://127.0.0.1:8765/`. The dashboard runs the compiled registration
 - an ambiguous layout with two exact submit matches where replay stops before either click.
 
 The dashboard is a visual, same-origin executor for the checked-in procedure contract in `sites/demo-procedure.json`. The production-shaped Python replay path below remains the source of truth for Browser Use integration and executes actions through `Tools.act()`.
+
+The Spotify graph panel also POSTs its task to this loopback server, which launches a visible fresh Chromium window and returns the verified graph result. A plain `python -m http.server` can render the page but cannot run Browser Use, so the Spotify button will explicitly report that the live runner is unavailable.
 
 ## Capture a run
 

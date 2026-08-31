@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from examples.integrations.memorable.spotify_demo_server import SpotifyDemoRequest
 from examples.integrations.memorable.spotify_graph import (
 	SpotifyGoal,
 	SpotifyTaskRouter,
@@ -33,6 +35,13 @@ from examples.integrations.memorable.spotify_graph import (
 			'Björk',
 			SpotifyGoal.POPULAR_TRACK,
 			3,
+			['spotify_home', 'search_results', 'canonical_artist', 'popular_track'],
+		),
+		(
+			'navigate to Portraits of Tracy and play the best song',
+			'Portraits of Tracy',
+			SpotifyGoal.POPULAR_TRACK,
+			1,
 			['spotify_home', 'search_results', 'canonical_artist', 'popular_track'],
 		),
 	],
@@ -90,3 +99,12 @@ def test_compiler_requires_three_distinct_verified_artists(tmp_path: Path) -> No
 
 	with pytest.raises(ValueError, match='need 3 distinct verified artists'):
 		compile_spotify_graph(tmp_path)
+
+
+def test_demo_server_request_is_narrow_and_bounded() -> None:
+	assert SpotifyDemoRequest(task='Open the artist result for Radiohead').task.endswith('Radiohead')
+
+	with pytest.raises(ValidationError):
+		SpotifyDemoRequest.model_validate({'task': 'x', 'headless': False})
+	with pytest.raises(ValidationError):
+		SpotifyDemoRequest(task='x' * 501)
