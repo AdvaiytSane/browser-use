@@ -62,6 +62,10 @@
     });
     const params = new URLSearchParams(location.search);
     if (params.get('notice') === '0') document.querySelector('.notice').remove();
+    if (params.get('duplicate_submit') === '1') {
+      const submit = document.querySelector('[type="submit"]');
+      submit.insertAdjacentElement('afterend', submit.cloneNode(true));
+    }
     document.querySelector('[aria-label="Dismiss notice"]')?.addEventListener('click', event => {
       event.currentTarget.closest('.notice').remove();
     });

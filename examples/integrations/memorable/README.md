@@ -132,6 +132,30 @@ The report groups exact task fingerprints, distinguishes agent-reported success 
 
 Two evidence-backed runs are enough for an adaptive replay experiment, not a general robustness claim. The analyzer requires at least three before it can emit `ready_for_replay_prototype` and reports route divergence and small samples as risks.
 
+## Compile and replay a semantic procedure
+
+Compile repeated successful runs entirely offline. The compiler retains stable DOM/accessibility fields and runtime parameter names, but excludes historical selector indices, coordinates, XPath, generated IDs, stable hashes, model prose and captured form values:
+
+```bash
+uv run python examples/integrations/memorable/procedure.py \
+  ./tmp/offline-runs ./tmp/registration.procedure.json \
+  --minimum-successful-runs 3
+```
+
+Replay uses a fresh Browser Use DOM snapshot before every action, requires exactly one visible/action-compatible match, executes through `Tools.act()`, and verifies a browser-native postcondition after every action. It makes no model calls:
+
+```bash
+uv run python examples/integrations/memorable/replay.py \
+  ./tmp/registration.procedure.json \
+  'http://127.0.0.1:8765/variant-b.html?notice=0' \
+  -p full_name='Ada Lovelace' \
+  -p email='ada.lovelace@example.test' \
+  -p country='Canada' \
+  --viewport-width 520 --viewport-height 700
+```
+
+The optional `Continue` transition executes on variant A and is skipped only when it is absent and a later required state is already uniquely available on variant B. `variant-b.html?duplicate_submit=1` creates two semantically identical submit buttons; replay must return `needs_recovery` without clicking either. Set `BROWSER_USE_MEMORABLE_SEMANTIC_REPLAY=0` for a fail-closed kill switch. Local audit bundles hash parameter-derived values rather than retaining them.
+
 ## Privacy boundary
 
 The entire bundle is a **private raw tier**. DOM text, raw HTML, live form values, screenshots, model conversations, action inputs, downloads and HAR data can contain credentials or personal information. Conversations, HAR, video and downloads are opt-in. `manifest.json` reports credential-shaped matches but does not redact or delete the raw evidence.
