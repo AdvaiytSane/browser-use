@@ -172,6 +172,34 @@ uv run python examples/integrations/memorable/replay.py \
 
 The optional `Continue` transition executes on variant A and is skipped only when it is absent and a later required state is already uniquely available on variant B. `variant-b.html?duplicate_submit=1` creates two semantically identical submit buttons; replay must return `needs_recovery` without clicking either. Set `BROWSER_USE_MEMORABLE_SEMANTIC_REPLAY=0` for a fail-closed kill switch. Local audit bundles hash parameter-derived values rather than retaining them.
 
+## BU Bench repeated-work protocol
+
+The public BU Bench leaderboard measures cold, heterogeneous tasks. Do not add warm replay results to that cold score. `bu_bench.py` instead runs a paired repeated-work protocol against BU Bench V1's `InteractionTests`: a cold Browser Use agent run produces a private capture, and a compiled procedure can later run as a separately labeled zero-model warm trial.
+
+The runner checkpoints execution metrics before calling the official judge. A judge outage therefore leaves `score` unknown while preserving the real steps, duration, cost, and capture bundle; it never fabricates a `0 steps / $0` agent failure.
+
+```bash
+uv run python examples/integrations/memorable/bu_bench.py \
+  --benchmark-root /path/to/browser-use-benchmark \
+  --task-index 2 \
+  --output-dir ./tmp/bu-bench-memory \
+  --mode cold --provider openai --model gpt-4.1 --repeat 3
+
+uv run python examples/integrations/memorable/procedure.py \
+  ./tmp/bu-bench-memory/captures/<task-fingerprint> \
+  ./tmp/bu-bench-memory/procedure.json \
+  --minimum-successful-runs 3
+
+uv run python examples/integrations/memorable/bu_bench.py \
+  --benchmark-root /path/to/browser-use-benchmark \
+  --task-index 2 \
+  --output-dir ./tmp/bu-bench-memory \
+  --mode warm --procedure ./tmp/bu-bench-memory/procedure.json \
+  --fallback-to-agent -p field_name='runtime value'
+```
+
+The runner rejects non-interaction tasks by default, checks the procedure's task fingerprint, resolves every action against fresh DOM state, and starts an agent fallback in a fresh browser after replay refusal. Fallback cost and duration remain a distinct result mode. Benchmark prompts, answers, captures, screenshots, and judge reasoning remain private local artifacts and must not be committed.
+
 ## Privacy boundary
 
 The entire bundle is a **private raw tier**. DOM text, raw HTML, live form values, screenshots, model conversations, action inputs, downloads and HAR data can contain credentials or personal information. Conversations, HAR, video and downloads are opt-in. `manifest.json` reports credential-shaped matches but does not redact or delete the raw evidence.
