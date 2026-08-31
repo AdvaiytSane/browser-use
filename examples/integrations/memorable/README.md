@@ -2,6 +2,22 @@
 
 This prototype records a Browser Use agent run into a local, self-describing bundle for later procedure mining. The collector does not call Memorable, an embedding service, or any other network endpoint. It composes Browser Use's existing hooks and does not modify the agent loop.
 
+## Open the Replay Lab
+
+Start the local fixture server from the repository root:
+
+```bash
+uv run python -m http.server 8765 --directory examples/integrations/memorable/sites
+```
+
+Then open `http://127.0.0.1:8765/`. The dashboard runs the compiled registration procedure against three live browser scenarios:
+
+- a two-stage layout where the optional `Continue` transition is present;
+- a narrow, reordered layout with random IDs where replay safely skips that absent transition;
+- an ambiguous layout with two exact submit matches where replay stops before either click.
+
+The dashboard is a visual, same-origin executor for the checked-in procedure contract in `sites/demo-procedure.json`. The production-shaped Python replay path below remains the source of truth for Browser Use integration and executes actions through `Tools.act()`.
+
 ## Capture a run
 
 ```python

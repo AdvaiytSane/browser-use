@@ -1,0 +1,94 @@
+{
+  "schema_version": "0.1.0",
+  "procedure_id": "fd257563ee2b1d42dbd0",
+  "expected_success_text": "Registration complete. Success code: MEM-042",
+  "parameters": ["email", "full_name", "country"],
+  "training": {
+    "successful_runs": 3,
+    "route_variants": 2,
+    "compiler": "deterministic_cross_run_semantic_aggregation",
+    "model_calls_during_compile": 0,
+    "values_retained_from_actions": false,
+    "volatile_fields_excluded": ["id", "xpath", "stable_hash", "bounds"]
+  },
+  "steps": [
+    {
+      "id": "email",
+      "label": "Enter email address",
+      "action": "input",
+      "locator": {
+        "node_name": "input",
+        "ax_role": "textbox",
+        "ax_name": "email address",
+        "attributes": {"autocomplete": "email", "name": "email", "type": "email"}
+      },
+      "value": {"parameter": "email"},
+      "clear": true,
+      "postcondition": {"type": "control_value_equals", "parameter": "email"}
+    },
+    {
+      "id": "full_name",
+      "label": "Enter full name",
+      "action": "input",
+      "locator": {
+        "node_name": "input",
+        "ax_role": "textbox",
+        "ax_name": "full name",
+        "attributes": {"autocomplete": "name", "name": "fullname"}
+      },
+      "value": {"parameter": "full_name"},
+      "clear": true,
+      "postcondition": {"type": "control_value_equals", "parameter": "full_name"}
+    },
+    {
+      "id": "continue",
+      "label": "Continue to preferences",
+      "action": "click",
+      "optional": true,
+      "route_coverage": 0.333,
+      "locator": {
+        "node_name": "button",
+        "ax_role": "button",
+        "ax_name": "continue",
+        "attributes": {"type": "button"}
+      },
+      "postcondition": {"type": "target_disappears"}
+    },
+    {
+      "id": "country",
+      "label": "Select country",
+      "action": "select",
+      "locator": {
+        "node_name": "select",
+        "ax_role": "combobox",
+        "ax_name": "country",
+        "attributes": {"name": "country"}
+      },
+      "value": {"parameter": "country"},
+      "postcondition": {"type": "control_value_equals", "parameter": "country"}
+    },
+    {
+      "id": "terms",
+      "label": "Accept terms",
+      "action": "click",
+      "locator": {
+        "node_name": "input",
+        "ax_role": "checkbox",
+        "ax_name": "accept terms",
+        "attributes": {"name": "terms", "type": "checkbox"}
+      },
+      "postcondition": {"type": "checked", "value": true}
+    },
+    {
+      "id": "submit",
+      "label": "Submit registration",
+      "action": "click",
+      "locator": {
+        "node_name": "button",
+        "ax_role": "button",
+        "attributes": {"type": "submit"}
+      },
+      "postcondition": {"type": "page_contains_text", "text": "Registration complete. Success code: MEM-042"}
+    }
+  ]
+}
