@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import threading
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +26,21 @@ from examples.integrations.memorable.spotify_graph import (
 
 MAX_REQUEST_BYTES = 16 * 1024
 STATIC_ROOT = Path(__file__).with_name('sites').resolve()
+ARTIFACT_PATH = re.compile(r'^/api/spotify/artifacts/(?P<run_id>[0-9a-f-]{30,40})/(?P<filename>state-[0-9]{2}-[a-z0-9_-]+\.png)$')
+
+
+def resolve_spotify_artifact(trace_dir: Path, request_path: str) -> Path | None:
+	"""Resolve only generated state screenshots underneath the configured trace root."""
+	match = ARTIFACT_PATH.fullmatch(urlsplit(request_path).path)
+	if match is None:
+		return None
+	root = trace_dir.expanduser().resolve()
+	target = (root / match.group('run_id') / match.group('filename')).resolve()
+	try:
+		target.relative_to(root)
+	except ValueError:
+		return None
+	return target if target.is_file() else None
 
 
 class SpotifyDemoRequest(BaseModel):
@@ -134,6 +150,21 @@ class SpotifyDemoHandler(SimpleHTTPRequestHandler):
 		self.send_header('Cache-Control', 'no-store')
 		self.send_header('X-Content-Type-Options', 'nosniff')
 		super().end_headers()
+
+	def do_GET(self) -> None:
+		if urlsplit(self.path).path.startswith('/api/spotify/artifacts/'):
+			artifact = resolve_spotify_artifact(self.server.trace_dir, self.path)
+			if artifact is None:
+				self.send_error(HTTPStatus.NOT_FOUND.value)
+				return
+			body = artifact.read_bytes()
+			self.send_response(HTTPStatus.OK.value)
+			self.send_header('Content-Type', 'image/png')
+			self.send_header('Content-Length', str(len(body)))
+			self.end_headers()
+			self.wfile.write(body)
+			return
+		super().do_GET()
 
 	def do_POST(self) -> None:
 		if urlsplit(self.path).path != '/api/spotify/run':

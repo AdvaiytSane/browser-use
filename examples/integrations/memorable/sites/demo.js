@@ -106,7 +106,7 @@ function renderSpotifyTask() {
 }
 
 function evidenceLabel(event, nodeId, payload) {
-	if (nodeId === "spotify_home") return payload?.intent ? "Spotify scope verified" : "not reached";
+	if (nodeId === "spotify_home") return event ? "Spotify scope verified" : "not reached";
   if (!event) return "not reached";
   if (event.status === "needs_recovery") return event.reason || "needs recovery";
 	if (event.evidence?.playback_started) return "playback verified";
@@ -114,6 +114,91 @@ function evidenceLabel(event, nodeId, payload) {
   if (event.evidence?.artist_url) return "artist page verified";
   if (event.evidence?.url_path) return `query stabilized · attempt ${event.evidence.input_attempts || 1}`;
   return event.status;
+}
+
+function shortHash(value) {
+  return value ? `${value.slice(0, 10)}…` : "unavailable";
+}
+
+function stateField(label, value, monospace = false) {
+  const row = document.createElement("div");
+  const key = document.createElement("small");
+  const content = document.createElement(monospace ? "code" : "span");
+  key.textContent = label;
+  content.textContent = value ?? "unavailable";
+  row.append(key, content);
+  return row;
+}
+
+function stateInspector(node, event) {
+  const details = document.createElement("details");
+  details.className = `state-inspector ${event.status}`;
+  const summary = document.createElement("summary");
+  const identity = document.createElement("span");
+  const nodeName = document.createElement("code");
+  const status = document.createElement("small");
+  nodeName.textContent = node.id;
+  status.textContent = `${event.status.replace("_", " ")} · ${event.duration_ms} ms`;
+  identity.append(nodeName, status);
+  const signature = document.createElement("code");
+  signature.className = "state-summary-signature";
+  signature.textContent = `DOM ${shortHash(event.state?.dom_sha256)}`;
+  summary.append(identity, signature);
+
+  const body = document.createElement("div");
+  body.className = "state-inspector-body";
+  if (event.state?.screenshot_url) {
+    const figure = document.createElement("figure");
+    const image = document.createElement("img");
+    const caption = document.createElement("figcaption");
+    image.src = event.state.screenshot_url;
+    image.alt = `${node.id} browser state`;
+    image.loading = "lazy";
+    caption.textContent = `captured ${event.state.captured_at}`;
+    figure.append(image, caption);
+    body.append(figure);
+  }
+
+  const metadata = document.createElement("div");
+  metadata.className = "state-metadata";
+  const viewport = event.state?.viewport;
+  const viewportText = viewport?.width && viewport?.height
+    ? `${viewport.width} × ${viewport.height} @ ${viewport.device_pixel_ratio || 1}x`
+    : "unavailable";
+	const delta = event.state?.delta_from_previous || {};
+	const deltaText = delta.previous_state
+		? `from ${delta.previous_state}: URL ${delta.url_changed ? "changed" : "same"}, DOM ${delta.dom_changed ? "changed" : "same"}, semantics ${delta.semantic_dom_changed ? "changed" : "same"}, pixels ${delta.screenshot_changed ? "changed" : "same"}, selectors ${delta.selectors_added >= 0 ? "+" : ""}${delta.selectors_added}`
+		: "initial captured state";
+  metadata.append(
+    stateField("URL", event.state?.url, true),
+    stateField("title", event.state?.title),
+    stateField("viewport", viewportText, true),
+    stateField("selector index", event.selector_index ?? "none", true),
+		stateField("action time", `${event.action_duration_ms} ms`, true),
+		stateField("capture overhead", `${event.capture_duration_ms} ms`, true),
+    stateField("interactive selectors", event.state?.selector_count ?? 0, true),
+    stateField("semantic chars", event.state?.semantic_dom_chars ?? 0, true),
+		stateField("change from previous", deltaText, true),
+    stateField("DOM SHA-256", event.state?.dom_sha256, true),
+    stateField("semantic SHA-256", event.state?.semantic_dom_sha256, true),
+    stateField("screenshot SHA-256", event.state?.screenshot_sha256, true),
+    stateField("browser errors", event.state?.browser_error_count ?? 0, true),
+  );
+  if (event.state?.capture_error || event.state?.state_error) {
+    metadata.append(stateField("capture warning", event.state.capture_error || event.state.state_error));
+  }
+  body.append(metadata);
+
+  const raw = document.createElement("details");
+  raw.className = "raw-state";
+  const rawSummary = document.createElement("summary");
+  const pre = document.createElement("pre");
+  rawSummary.textContent = "raw event JSON";
+  pre.textContent = JSON.stringify(event, null, 2);
+  raw.append(rawSummary, pre);
+  body.append(raw);
+  details.append(summary, body);
+  return details;
 }
 
 function appendRunGraph(payload, task, intent) {
@@ -140,6 +225,7 @@ function appendRunGraph(payload, task, intent) {
   taskText.textContent = task;
   const flow = document.createElement("div");
   flow.className = "run-flow";
+	const reachedStates = [];
   const path = payload?.intent?.path || ["spotify_home"];
   path.forEach((nodeId, index) => {
     if (index > 0) {
@@ -150,9 +236,13 @@ function appendRunGraph(payload, task, intent) {
     }
     const node = spotifyGraph.nodes.find((candidate) => candidate.id === nodeId) || { id: nodeId };
     const event = payload?.events?.find((candidate) => candidate.target === nodeId);
-    const nodeStatus = nodeId === "spotify_home" && payload?.intent ? "executed" : (event?.status || "pending");
+		const nodeStatus = event?.status || "pending";
     flow.append(graphNode(node, `run-node ${nodeStatus}`, evidenceLabel(event, nodeId, payload)));
+		if (event) reachedStates.push([node, event]);
   });
+	const inspectors = document.createElement("div");
+	inspectors.className = "state-inspectors";
+	reachedStates.forEach(([node, event]) => inspectors.append(stateInspector(node, event)));
 
   const outcome = document.createElement("p");
   outcome.className = "run-outcome";
@@ -167,7 +257,7 @@ function appendRunGraph(payload, task, intent) {
 	} else {
     outcome.textContent = `Recovery · ${payload?.reason || "artist binding failed before browser launch"}`;
   }
-  item.append(header, taskText, flow, outcome);
+  item.append(header, taskText, flow, inspectors, outcome);
   ui.history.prepend(item);
 }
 

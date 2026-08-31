@@ -12,6 +12,8 @@ uv run python examples/integrations/memorable/spotify_demo_server.py --no-headle
 
 Then open `http://127.0.0.1:8765/`. The dashboard routes Spotify tasks through one parameterized graph. A run can stop at the canonical artist page, extract a ranked Popular track, or play that track. Every run gets an evidence-backed graph card in the dashboard.
 
+Each reached graph state also gets a collapsed evidence inspector. Expand it to see the exact local screenshot, URL/title, viewport and scroll geometry, selector count, transition time, DOM SHA-256, semantic DOM SHA-256, action evidence, and raw event JSON. Screenshots remain under `--trace-dir` with mode `0600`; the dashboard serves only the generated per-run PNG paths. Raw DOM is deliberately not retained by this demo.
+
 The server keeps one visible Chromium window open and reuses `./tmp/spotify-demo-profile`, so playback can retain an authenticated Spotify session. On the first guest playback attempt, sign in in that window and rerun the task. Guest playback is reported as `needs_recovery`; it is never misreported as success. Override the profile location with `--profile-dir`. Follows, likes, and playlist mutations remain disabled.
 
 The dashboard POSTs its task to the loopback server, which launches visible Chromium and returns the verified graph result. A plain `python -m http.server` can render the page but cannot run Browser Use, so the Spotify button explicitly reports that the live runner is unavailable.

@@ -4,10 +4,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from examples.integrations.memorable.spotify_demo_server import SpotifyDemoRequest
+from examples.integrations.memorable.spotify_demo_server import SpotifyDemoRequest, resolve_spotify_artifact
 from examples.integrations.memorable.spotify_graph import (
+	GraphEvent,
 	SpotifyGoal,
 	SpotifyTaskRouter,
+	StateEvidence,
 	compile_spotify_graph,
 	search_url_matches_artist,
 	spotify_graph_template,
@@ -143,3 +145,44 @@ def test_playback_is_an_optional_terminal_after_extraction() -> None:
 	assert graph.path_to('popular_track')[-1].id == 'read_ranked_popular_track'
 	assert graph.path_to('play_track')[-1].id == 'play_ranked_popular_track'
 	assert graph.node('play_track').terminal is True
+
+
+def test_graph_event_serializes_state_evidence() -> None:
+	event = GraphEvent(
+		edge_id='search_for_artist',
+		source='spotify_home',
+		target='search_results',
+		status='executed',
+		duration_ms=321,
+		action_duration_ms=200,
+		capture_duration_ms=121,
+		state=StateEvidence(
+			captured_at='2026-08-31T00:00:00+00:00',
+			url='https://open.spotify.com/search/Daft%20Punk',
+			dom_sha256='a' * 64,
+			semantic_dom_sha256='b' * 64,
+			selector_count=42,
+			screenshot_url='/api/spotify/artifacts/01234567-89ab-cdef-0123-456789abcdef/state-01-search-results.png',
+		),
+	)
+
+	payload = event.model_dump(mode='json')
+
+	assert payload['duration_ms'] == 321
+	assert payload['action_duration_ms'] + payload['capture_duration_ms'] == payload['duration_ms']
+	assert payload['state']['selector_count'] == 42
+	assert payload['state']['dom_sha256'] != payload['state']['semantic_dom_sha256']
+
+
+def test_artifact_resolver_only_serves_generated_run_screenshots(tmp_path: Path) -> None:
+	run_id = '01234567-89ab-cdef-0123-456789abcdef'
+	run_dir = tmp_path / run_id
+	run_dir.mkdir()
+	screenshot = run_dir / 'state-01-search-results.png'
+	screenshot.write_bytes(b'png')
+
+	assert (
+		resolve_spotify_artifact(tmp_path, f'/api/spotify/artifacts/{run_id}/state-01-search-results.png') == screenshot.resolve()
+	)
+	assert resolve_spotify_artifact(tmp_path, f'/api/spotify/artifacts/{run_id}/../secret.png') is None
+	assert resolve_spotify_artifact(tmp_path, f'/api/spotify/artifacts/{run_id}/state.json') is None

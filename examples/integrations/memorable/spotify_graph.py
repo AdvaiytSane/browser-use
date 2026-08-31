@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -167,13 +168,37 @@ class SpotifyTaskIntent(BaseModel):
 	path: list[str]
 
 
+class StateEvidence(BaseModel):
+	"""Browser-native evidence captured after one graph transition."""
+
+	captured_at: str
+	url: str | None = None
+	title: str | None = None
+	document: dict[str, Any] = Field(default_factory=dict)
+	viewport: dict[str, Any] = Field(default_factory=dict)
+	dom_sha256: str | None = None
+	semantic_dom_sha256: str | None = None
+	semantic_dom_chars: int = 0
+	selector_count: int = 0
+	screenshot_url: str | None = None
+	screenshot_sha256: str | None = None
+	browser_error_count: int = 0
+	state_error: str | None = None
+	capture_error: str | None = None
+	delta_from_previous: dict[str, Any] = Field(default_factory=dict)
+
+
 class GraphEvent(BaseModel):
 	edge_id: str
 	source: str
 	target: str
 	status: Literal['executed', 'extracted', 'needs_recovery']
 	selector_index: int | None = None
+	duration_ms: int = Field(default=0, ge=0)
+	action_duration_ms: int = Field(default=0, ge=0)
+	capture_duration_ms: int = Field(default=0, ge=0)
 	evidence: dict[str, Any] = Field(default_factory=dict)
+	state: StateEvidence | None = None
 	reason: str | None = None
 
 
@@ -439,18 +464,32 @@ class SpotifyGraphExecutor:
 		except ValueError as exc:
 			return SpotifyGraphReport(run_id=run_id, status='needs_recovery', reason=str(exc))
 		report = SpotifyGraphReport(run_id=run_id, status='completed', intent=intent)
+		run_started = time.monotonic()
 		state = await browser_session.get_browser_state_summary(include_screenshot=False)
 		if urlsplit(state.url).netloc != 'open.spotify.com':
 			report.status = 'needs_recovery'
 			report.reason = f'current page is outside Spotify scope: {state.url}'
 			return report
+		await self._record_event(
+			report,
+			browser_session,
+			edge_id='verify_spotify_scope',
+			source='spotify_home',
+			target='spotify_home',
+			status='executed',
+			started_at=run_started,
+			evidence={'origin': SPOTIFY_ORIGIN, 'scope_verified': True},
+		)
 
 		for edge in self.graph.path_to(intent.goal_node.value):
+			edge_started = time.monotonic()
 			if edge.action == GraphAction.INPUT:
 				resolved = await self._wait_for_resolution(browser_session, edge.locator, {'artist': intent.artist})
 				resolution = resolved[1] if resolved else []
 				if len(resolution) != 1:
-					return self._refuse(report, edge, f'search locator resolved to {len(resolution)} candidates')
+					return await self._refuse(
+						report, browser_session, edge, f'search locator resolved to {len(resolution)} candidates', edge_started
+					)
 				index, _ = resolution[0]
 				input_attempts = 0
 				state = None
@@ -467,133 +506,302 @@ class SpotifyGraphExecutor:
 						action_timeout=15,
 					)
 					if result.error:
-						return self._refuse(report, edge, f'Browser Use input failed: {result.error}', index)
+						return await self._refuse(
+							report, browser_session, edge, f'Browser Use input failed: {result.error}', edge_started, index
+						)
 					state = await self._wait_for_search_query(browser_session, intent.artist)
 					if state is not None:
 						break
 				if state is None:
-					return self._refuse(report, edge, 'full Spotify search query did not stabilize after 2 attempts', index)
-				report.events.append(
-					GraphEvent(
-						edge_id=edge.id,
-						source=edge.source,
-						target=edge.target,
-						status='executed',
-						selector_index=index,
-						evidence={'url_path': urlsplit(state.url).path, 'input_attempts': input_attempts},
+					return await self._refuse(
+						report,
+						browser_session,
+						edge,
+						'full Spotify search query did not stabilize after 2 attempts',
+						edge_started,
+						index,
 					)
+				await self._record_event(
+					report,
+					browser_session,
+					edge_id=edge.id,
+					source=edge.source,
+					target=edge.target,
+					status='executed',
+					started_at=edge_started,
+					selector_index=index,
+					evidence={'url_path': urlsplit(state.url).path, 'input_attempts': input_attempts},
 				)
 			elif edge.action == GraphAction.CLICK:
 				resolved = await self._wait_for_resolution(browser_session, edge.locator, {'artist': intent.artist}, timeout=15)
 				resolution = resolved[1] if resolved else []
 				if len(resolution) != 1:
-					return self._refuse(report, edge, f'canonical artist result resolved to {len(resolution)} candidates')
+					return await self._refuse(
+						report,
+						browser_session,
+						edge,
+						f'canonical artist result resolved to {len(resolution)} candidates',
+						edge_started,
+					)
 				index, node = resolution[0]
 				href = str((node.attributes or {}).get('href') or '')
 				result = await self.tools.act(
 					self.action_model.model_validate({'click': {'index': index}}), browser_session, action_timeout=15
 				)
 				if result.error:
-					return self._refuse(report, edge, f'Browser Use click failed: {result.error}', index)
+					return await self._refuse(
+						report, browser_session, edge, f'Browser Use click failed: {result.error}', edge_started, index
+					)
 				artist_page = await self._wait_for_artist_page(browser_session, intent.artist)
 				if artist_page is None:
-					return self._refuse(report, edge, 'canonical artist page predicate did not pass', index)
-				report.artist_url = artist_page['url']
-				report.events.append(
-					GraphEvent(
-						edge_id=edge.id,
-						source=edge.source,
-						target=edge.target,
-						status='executed',
-						selector_index=index,
-						evidence={
-							'candidate_href': href,
-							'artist_url': artist_page['url'],
-							'exact_heading': True,
-							'popular_section': True,
-						},
+					return await self._refuse(
+						report,
+						browser_session,
+						edge,
+						'canonical artist page predicate did not pass',
+						edge_started,
+						index,
 					)
+				report.artist_url = artist_page['url']
+				await self._record_event(
+					report,
+					browser_session,
+					edge_id=edge.id,
+					source=edge.source,
+					target=edge.target,
+					status='executed',
+					started_at=edge_started,
+					selector_index=index,
+					evidence={
+						'candidate_href': href,
+						'artist_url': artist_page['url'],
+						'exact_heading': True,
+						'popular_section': True,
+					},
 				)
 			elif edge.action == GraphAction.EXTRACT_RANKED:
 				page = await self._read_artist_page(browser_session)
 				rank = intent.track_rank or 1
 				tracks = [SpotifyTrack.model_validate(track) for track in page.get('popular_tracks', [])] if page else []
 				if rank > len(tracks):
-					return self._refuse(report, edge, f'Popular exposes {len(tracks)} visible tracks; rank {rank} is unavailable')
-				report.track = tracks[rank - 1]
-				report.events.append(
-					GraphEvent(
-						edge_id=edge.id,
-						source=edge.source,
-						target=edge.target,
-						status='extracted',
-						evidence={
-							'rank': rank,
-							'visible_track_count': len(tracks),
-							'track_name': report.track.name,
-							'track_url': report.track.url,
-						},
+					return await self._refuse(
+						report,
+						browser_session,
+						edge,
+						f'Popular exposes {len(tracks)} visible tracks; rank {rank} is unavailable',
+						edge_started,
 					)
+				report.track = tracks[rank - 1]
+				await self._record_event(
+					report,
+					browser_session,
+					edge_id=edge.id,
+					source=edge.source,
+					target=edge.target,
+					status='extracted',
+					started_at=edge_started,
+					evidence={
+						'rank': rank,
+						'visible_track_count': len(tracks),
+						'track_name': report.track.name,
+						'track_url': report.track.url,
+					},
 				)
 			elif edge.action == GraphAction.PLAY_RANKED:
 				if report.track is None:
-					return self._refuse(report, edge, 'ranked track was not extracted before playback')
+					return await self._refuse(
+						report, browser_session, edge, 'ranked track was not extracted before playback', edge_started
+					)
 				target = await self._wait_for_play_target(browser_session, report.track)
 				if target is None:
-					return self._refuse(report, edge, 'play control did not resolve to one rendered target')
+					return await self._refuse(
+						report, browser_session, edge, 'play control did not resolve to one rendered target', edge_started
+					)
 				result = await self.tools.act(
 					self.action_model.model_validate({'click': {'coordinate_x': target['x'], 'coordinate_y': target['y']}}),
 					browser_session,
 					action_timeout=15,
 				)
 				if result.error:
-					return self._refuse(report, edge, f'Browser Use play click failed: {result.error}')
+					return await self._refuse(
+						report, browser_session, edge, f'Browser Use play click failed: {result.error}', edge_started
+					)
 				playback = await self._wait_for_playback(browser_session, report.track)
 				if playback.get('auth_required'):
-					return self._refuse(
+					return await self._refuse(
 						report,
+						browser_session,
 						edge,
 						'Spotify requires a signed-in session for playback; sign in once in the persistent demo profile and retry',
+						edge_started,
 					)
 				if not playback.get('playing'):
-					return self._refuse(report, edge, 'playback state did not change to Pause')
-				report.playback_started = True
-				report.events.append(
-					GraphEvent(
-						edge_id=edge.id,
-						source=edge.source,
-						target=edge.target,
-						status='executed',
-						evidence={
-							'rank': report.track.rank,
-							'track_name': report.track.name,
-							'track_url': report.track.url,
-							'playback_started': True,
-							'row_control': 'Pause',
-							'current_geometry': {'x': target['x'], 'y': target['y']},
-						},
+					return await self._refuse(
+						report, browser_session, edge, 'playback state did not change to Pause', edge_started
 					)
+				report.playback_started = True
+				await self._record_event(
+					report,
+					browser_session,
+					edge_id=edge.id,
+					source=edge.source,
+					target=edge.target,
+					status='executed',
+					started_at=edge_started,
+					evidence={
+						'rank': report.track.rank,
+						'track_name': report.track.name,
+						'track_url': report.track.url,
+						'playback_started': True,
+						'row_control': 'Pause',
+						'current_geometry': {'x': target['x'], 'y': target['y']},
+					},
 				)
 		report.terminal_node = intent.goal_node.value
 		if self.trace_dir and report.artist_url:
 			report.trace_path = str(await self._write_trace(report, browser_session))
 		return report
 
-	@staticmethod
-	def _refuse(
-		report: SpotifyGraphReport, edge: GraphEdge, reason: str, selector_index: int | None = None
+	async def _record_event(
+		self,
+		report: SpotifyGraphReport,
+		browser_session: BrowserSession,
+		*,
+		edge_id: str,
+		source: str,
+		target: str,
+		status: Literal['executed', 'extracted', 'needs_recovery'],
+		started_at: float,
+		selector_index: int | None = None,
+		evidence: dict[str, Any] | None = None,
+		reason: str | None = None,
+	) -> None:
+		action_duration_ms = max(0, round((time.monotonic() - started_at) * 1000))
+		capture_started = time.monotonic()
+		state = await self._capture_state_evidence(report.run_id, target, len(report.events), browser_session)
+		capture_duration_ms = max(0, round((time.monotonic() - capture_started) * 1000))
+		previous = report.events[-1].state if report.events else None
+		if previous is not None:
+			state.delta_from_previous = {
+				'previous_state': report.events[-1].target,
+				'url_changed': state.url != previous.url,
+				'dom_changed': state.dom_sha256 != previous.dom_sha256,
+				'semantic_dom_changed': state.semantic_dom_sha256 != previous.semantic_dom_sha256,
+				'screenshot_changed': state.screenshot_sha256 != previous.screenshot_sha256,
+				'selectors_added': state.selector_count - previous.selector_count,
+			}
+		report.events.append(
+			GraphEvent(
+				edge_id=edge_id,
+				source=source,
+				target=target,
+				status=status,
+				selector_index=selector_index,
+				duration_ms=action_duration_ms + capture_duration_ms,
+				action_duration_ms=action_duration_ms,
+				capture_duration_ms=capture_duration_ms,
+				evidence=evidence or {},
+				state=state,
+				reason=reason,
+			)
+		)
+
+	async def _capture_state_evidence(
+		self,
+		run_id: str,
+		state_id: str,
+		ordinal: int,
+		browser_session: BrowserSession,
+	) -> StateEvidence:
+		captured_at = datetime.now(timezone.utc).isoformat()
+		try:
+			state = await browser_session.get_browser_state_summary(include_screenshot=True)
+		except Exception as exc:
+			return StateEvidence(captured_at=captured_at, capture_error=f'browser state unavailable: {type(exc).__name__}')
+
+		semantic_dom = state.dom_state.llm_representation()
+		evidence = StateEvidence(
+			captured_at=captured_at,
+			url=state.url,
+			title=state.title,
+			semantic_dom_sha256=hashlib.sha256(semantic_dom.encode()).hexdigest(),
+			semantic_dom_chars=len(semantic_dom),
+			selector_count=len(state.dom_state.selector_map),
+			browser_error_count=len(state.browser_errors),
+			state_error=state.state_error,
+		)
+		if state.page_info:
+			evidence.viewport = state.page_info.model_dump(mode='json')
+
+		try:
+			page = await browser_session.must_get_current_page()
+			payload_text = await page.evaluate(
+				"""() => JSON.stringify({
+					document: {
+						ready_state: document.readyState,
+						visibility_state: document.visibilityState,
+						content_type: document.contentType,
+						language: document.documentElement.lang || null,
+					},
+					viewport: {
+						width: window.innerWidth,
+						height: window.innerHeight,
+						device_pixel_ratio: window.devicePixelRatio,
+						scroll_x: window.scrollX,
+						scroll_y: window.scrollY,
+						document_width: document.documentElement.scrollWidth,
+						document_height: document.documentElement.scrollHeight,
+					},
+					outer_html: document.documentElement.outerHTML,
+				})"""
+			)
+			payload = json.loads(payload_text)
+			outer_html = str(payload.pop('outer_html', ''))
+			evidence.document = payload.get('document', {})
+			evidence.viewport = {**evidence.viewport, **payload.get('viewport', {})}
+			evidence.dom_sha256 = hashlib.sha256(outer_html.encode()).hexdigest()
+		except Exception as exc:
+			evidence.capture_error = f'rendered DOM metadata unavailable: {type(exc).__name__}'
+
+		if state.screenshot and self.trace_dir:
+			try:
+				screenshot = base64.b64decode(state.screenshot, validate=True)
+				filename = f'state-{ordinal:02d}-{re.sub(r"[^a-z0-9_-]+", "-", state_id.casefold())}.png'
+				root = self.trace_dir.expanduser().resolve()
+				run_dir = root / run_id
+				run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+				os.chmod(root, 0o700)
+				os.chmod(run_dir, 0o700)
+				path = run_dir / filename
+				path.write_bytes(screenshot)
+				os.chmod(path, 0o600)
+				evidence.screenshot_sha256 = hashlib.sha256(screenshot).hexdigest()
+				evidence.screenshot_url = f'/api/spotify/artifacts/{run_id}/{filename}'
+			except Exception as exc:
+				evidence.capture_error = f'screenshot unavailable: {type(exc).__name__}'
+		return evidence
+
+	async def _refuse(
+		self,
+		report: SpotifyGraphReport,
+		browser_session: BrowserSession,
+		edge: GraphEdge,
+		reason: str,
+		started_at: float,
+		selector_index: int | None = None,
 	) -> SpotifyGraphReport:
 		report.status = 'needs_recovery'
 		report.reason = f'{edge.id}: {reason}'
-		report.events.append(
-			GraphEvent(
-				edge_id=edge.id,
-				source=edge.source,
-				target=edge.target,
-				status='needs_recovery',
-				selector_index=selector_index,
-				reason=reason,
-			)
+		await self._record_event(
+			report,
+			browser_session,
+			edge_id=edge.id,
+			source=edge.source,
+			target=edge.target,
+			status='needs_recovery',
+			started_at=started_at,
+			selector_index=selector_index,
+			reason=reason,
 		)
 		return report
 
