@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from uuid_extensions import uuid7str
@@ -37,6 +37,13 @@ SPOTIFY_GRAPH_KILL_SWITCH = 'BROWSER_USE_MEMORABLE_SPOTIFY_GRAPH'
 
 def _normalize(value: Any) -> str:
 	return re.sub(r'\s+', ' ', str(value or '').strip()).casefold()
+
+
+def search_url_matches_artist(url: str, artist: str) -> bool:
+	path = urlsplit(url).path
+	if not path.startswith('/search/'):
+		return False
+	return _normalize(unquote(path.removeprefix('/search/'))) == _normalize(artist)
 
 
 class SpotifyGoal(str, Enum):
@@ -240,6 +247,8 @@ class SpotifyTaskRouter:
 			r'(?:search(?:\s+spotify)?\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)',
 			r'(?:artist\s+result\s+for|artist\s+page\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)',
 			r'(?:navigate|go|open)(?:\s+spotify)?\s+to\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)',
+			r'(?:song|track|music)\s+(?:by|from)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)',
+			r'(?:best|top|popular)\s+(?:song|track)\s+(?:for|by)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)',
 		)
 		for pattern in patterns:
 			match = re.search(pattern, task, flags=re.IGNORECASE)
@@ -414,16 +423,27 @@ class SpotifyGraphExecutor:
 				if len(resolution) != 1:
 					return self._refuse(report, edge, f'search locator resolved to {len(resolution)} candidates')
 				index, _ = resolution[0]
-				result = await self.tools.act(
-					self.action_model.model_validate({'input': {'index': index, 'text': intent.artist, 'clear': True}}),
-					browser_session,
-					action_timeout=15,
-				)
-				if result.error:
-					return self._refuse(report, edge, f'Browser Use input failed: {result.error}', index)
-				state = await self._wait_for_state(browser_session, lambda current: '/search/' in urlsplit(current.url).path)
+				input_attempts = 0
+				state = None
+				for input_attempts in range(1, 3):
+					if input_attempts > 1:
+						resolved = await self._wait_for_resolution(browser_session, edge.locator, {'artist': intent.artist})
+						resolution = resolved[1] if resolved else []
+						if len(resolution) != 1:
+							break
+						index, _ = resolution[0]
+					result = await self.tools.act(
+						self.action_model.model_validate({'input': {'index': index, 'text': intent.artist, 'clear': True}}),
+						browser_session,
+						action_timeout=15,
+					)
+					if result.error:
+						return self._refuse(report, edge, f'Browser Use input failed: {result.error}', index)
+					state = await self._wait_for_search_query(browser_session, intent.artist)
+					if state is not None:
+						break
 				if state is None:
-					return self._refuse(report, edge, 'Spotify search state did not appear', index)
+					return self._refuse(report, edge, 'full Spotify search query did not stabilize after 2 attempts', index)
 				report.events.append(
 					GraphEvent(
 						edge_id=edge.id,
@@ -431,7 +451,7 @@ class SpotifyGraphExecutor:
 						target=edge.target,
 						status='executed',
 						selector_index=index,
-						evidence={'url_path': urlsplit(state.url).path},
+						evidence={'url_path': urlsplit(state.url).path, 'input_attempts': input_attempts},
 					)
 				)
 			elif edge.action == GraphAction.CLICK:
@@ -569,6 +589,13 @@ class SpotifyGraphExecutor:
 				return state
 			await asyncio.sleep(0.2)
 		return None
+
+	async def _wait_for_search_query(
+		self, browser_session: BrowserSession, artist: str, timeout: float = 10
+	) -> BrowserStateSummary | None:
+		return await self._wait_for_state(
+			browser_session, lambda state: search_url_matches_artist(state.url, artist), timeout=timeout
+		)
 
 	async def _wait_for_resolution(
 		self,

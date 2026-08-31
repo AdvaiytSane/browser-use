@@ -9,6 +9,7 @@ from examples.integrations.memorable.spotify_graph import (
 	SpotifyGoal,
 	SpotifyTaskRouter,
 	compile_spotify_graph,
+	search_url_matches_artist,
 	spotify_graph_template,
 )
 
@@ -42,6 +43,20 @@ from examples.integrations.memorable.spotify_graph import (
 			'Portraits of Tracy',
 			SpotifyGoal.POPULAR_TRACK,
 			1,
+			['spotify_home', 'search_results', 'canonical_artist', 'popular_track'],
+		),
+		(
+			'Can you find me the best song by Portraits of Tracy',
+			'Portraits of Tracy',
+			SpotifyGoal.POPULAR_TRACK,
+			1,
+			['spotify_home', 'search_results', 'canonical_artist', 'popular_track'],
+		),
+		(
+			'What is the third track by Björk?',
+			'Björk',
+			SpotifyGoal.POPULAR_TRACK,
+			3,
 			['spotify_home', 'search_results', 'canonical_artist', 'popular_track'],
 		),
 	],
@@ -108,3 +123,8 @@ def test_demo_server_request_is_narrow_and_bounded() -> None:
 		SpotifyDemoRequest.model_validate({'task': 'x', 'headless': False})
 	with pytest.raises(ValidationError):
 		SpotifyDemoRequest(task='x' * 501)
+
+
+def test_search_postcondition_rejects_partial_spotify_query() -> None:
+	assert search_url_matches_artist('https://open.spotify.com/search/Portraits%20of%20Tracy', 'Portraits of Tracy')
+	assert not search_url_matches_artist('https://open.spotify.com/search/Portraits%20of%20T', 'Portraits of Tracy')

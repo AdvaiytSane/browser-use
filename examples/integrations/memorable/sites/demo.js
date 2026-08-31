@@ -391,6 +391,8 @@ function spotifyIntent(task) {
     /(?:search(?:\s+spotify)?\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
     /(?:artist\s+result\s+for|artist\s+page\s+for)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
     /(?:navigate|go|open)(?:\s+spotify)?\s+to\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
+    /(?:song|track|music)\s+(?:by|from)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
+    /(?:best|top|popular)\s+(?:song|track)\s+(?:for|by)\s+(.+?)(?:,|\s+and\s+|\s+then\s+|$)/i,
   ];
   const match = quoted || patterns.map((pattern) => task.match(pattern)).find(Boolean);
   const artist = (match?.[1] || "").trim().replace(/^[“”"'\s]+|[“”"'.,;:!?\s]+$/g, "");
