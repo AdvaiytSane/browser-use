@@ -199,7 +199,7 @@ h1 span { color: var(--muted); }
 .skipped .trace-result { color: var(--amber); background: rgba(255,199,96,.08); }
 .refused .trace-result { color: var(--red); background: rgba(255,114,95,.1); }
 
-.spotify-lab { display: grid; grid-template-columns: minmax(330px, .8fr) minmax(540px, 1.2fr); gap: 34px; margin-top: 34px; padding: 32px; border: 1px solid var(--line-strong); border-radius: 18px; background: linear-gradient(135deg, rgba(26,28,25,.96), rgba(14,15,14,.96)); box-shadow: var(--shadow); }
+.spotify-lab { display: grid; grid-template-columns: minmax(330px, .8fr) minmax(540px, 1.2fr); gap: 34px; margin-top: 0; padding: 32px; border: 1px solid var(--line-strong); border-radius: 18px; background: linear-gradient(135deg, rgba(26,28,25,.96), rgba(14,15,14,.96)); box-shadow: var(--shadow); }
 .spotify-copy h2 { margin: 0; max-width: 620px; font-size: clamp(28px, 3.4vw, 46px); line-height: 1.02; letter-spacing: -.05em; }
 .spotify-copy > p:not(.eyebrow) { margin: 18px 0 22px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .spotify-copy code, .graph-note code { color: var(--acid); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -216,7 +216,7 @@ h1 span { color: var(--muted); }
 .spotify-binding strong { margin-top: 5px; color: var(--acid); font-size: 12px; font-weight: 620; }
 .graph-card { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 13px; background: #111210; }
 .graph-meta { display: flex; justify-content: space-between; gap: 12px; color: var(--dim); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .08em; }
-.graph-flow { display: grid; grid-template-columns: minmax(100px, 1fr) auto minmax(100px, 1fr) auto minmax(100px, 1fr) auto minmax(100px, 1fr); align-items: stretch; gap: 7px; margin: 25px 0 20px; }
+.graph-flow { display: grid; grid-template-columns: minmax(90px, 1fr) auto minmax(90px, 1fr) auto minmax(90px, 1fr) auto minmax(90px, 1fr) auto minmax(90px, 1fr); align-items: stretch; gap: 7px; margin: 25px 0 20px; }
 .graph-node { min-width: 0; padding: 13px 10px; border: 1px solid var(--line); border-radius: 9px; background: #171817; transition: opacity .2s ease, border-color .2s ease; }
 .graph-node code, .graph-node span { display: block; }
 .graph-node code { overflow: hidden; color: var(--muted); font: 600 9px ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
@@ -233,6 +233,31 @@ h1 span { color: var(--muted); }
 .graph-result.refused { color: var(--red); border-color: rgba(255,114,95,.35); }
 .graph-note { margin: 15px 0 0; color: var(--dim); font-size: 9px; line-height: 1.55; }
 
+.run-history-panel { margin-top: 16px; padding: 28px 30px; border: 1px solid var(--line-strong); border-radius: 18px; background: rgba(17,18,16,.84); box-shadow: var(--shadow); }
+.run-history-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
+.run-history-heading h2 { margin: 0; font-size: 28px; letter-spacing: -.045em; }
+.run-history-heading > span { color: var(--acid); font: 650 9px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.run-history { display: grid; gap: 10px; margin: 22px 0 0; padding: 0; list-style: none; }
+.run-history-empty { padding: 30px; color: var(--dim); border: 1px dashed var(--line-strong); border-radius: 12px; text-align: center; font-size: 11px; }
+.run-card { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #111210; animation: trace-in .28s ease both; }
+.run-card.completed { border-color: rgba(120,240,177,.24); }
+.run-card.needs_recovery { border-color: rgba(255,114,95,.34); }
+.run-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.run-card-header small, .run-card-header strong { display: block; }
+.run-card-header small { color: var(--dim); font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.run-card-header strong { margin-top: 4px; font-size: 14px; }
+.run-status { padding: 5px 7px; color: var(--mint); border: 1px solid rgba(120,240,177,.25); border-radius: 5px; background: rgba(120,240,177,.06); font: 650 8px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.needs_recovery .run-status { color: var(--red); border-color: rgba(255,114,95,.32); background: rgba(255,114,95,.07); }
+.run-task { margin: 12px 0 14px; color: var(--muted); font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.run-flow { display: grid; grid-template-columns: minmax(90px, 1fr) auto minmax(90px, 1fr) auto minmax(90px, 1fr) auto minmax(90px, 1fr) auto minmax(90px, 1fr); align-items: stretch; gap: 7px; }
+.run-flow .graph-node { padding: 10px; }
+.run-flow .graph-node.executed, .run-flow .graph-node.extracted { border-color: rgba(120,240,177,.34); background: rgba(120,240,177,.055); }
+.run-flow .graph-node.needs_recovery { border-color: rgba(255,114,95,.45); background: rgba(255,114,95,.07); }
+.run-flow .graph-node.pending { opacity: .28; }
+.run-arrow { align-self: center; color: var(--mint); }
+.run-outcome { margin: 13px 0 0; padding-top: 12px; color: var(--mint); border-top: 1px solid var(--line); font-size: 10px; }
+.needs_recovery .run-outcome { color: var(--red); }
+
 .explanation-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 34px; margin-top: 34px; padding: 0 4px; }
 .explanation-row > div { display: grid; grid-template-columns: auto 1fr; gap: 14px; }
 .explanation-row > div > span { color: var(--acid); font: 600 9px ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -248,6 +273,8 @@ h1 span { color: var(--muted); }
   .trace-item { margin: 0; }
   .resolver-card { max-width: 600px; }
 	.spotify-lab { grid-template-columns: 1fr; }
+	.run-flow { grid-template-columns: 1fr; }
+	.run-arrow { justify-self: center; transform: rotate(90deg); }
 }
 
 @media (max-width: 820px) {

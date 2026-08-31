@@ -1,9 +1,9 @@
 """Task-conditioned semantic graph replay for Spotify's public web player.
 
-The graph is parameterized by artist and track rank. It intentionally performs
-read-only navigation and extraction: no playback, follows, likes, or playlist
-mutations. A task can terminate at the canonical artist node or continue to an
-ordered Popular-track extraction node.
+The graph is parameterized by artist and track rank. A task can stop on the
+canonical artist, extract a ranked Popular track, or continue to verified
+playback. Playback requires a signed-in Spotify session; follows, likes, and
+playlist mutations remain out of scope.
 """
 
 from __future__ import annotations
@@ -49,12 +49,14 @@ def search_url_matches_artist(url: str, artist: str) -> bool:
 class SpotifyGoal(str, Enum):
 	CANONICAL_ARTIST = 'canonical_artist'
 	POPULAR_TRACK = 'popular_track'
+	PLAY_TRACK = 'play_track'
 
 
 class GraphAction(str, Enum):
 	INPUT = 'input'
 	CLICK = 'click'
 	EXTRACT_RANKED = 'extract_ranked'
+	PLAY_RANKED = 'play_ranked'
 
 
 class GraphLocator(BaseModel):
@@ -182,6 +184,7 @@ class SpotifyGraphReport(BaseModel):
 	terminal_node: str | None = None
 	artist_url: str | None = None
 	track: SpotifyTrack | None = None
+	playback_started: bool = False
 	model_calls: Literal[0] = 0
 	events: list[GraphEvent] = Field(default_factory=list)
 	reason: str | None = None
@@ -214,9 +217,18 @@ class SpotifyTaskRouter:
 		scores = {
 			node.id: sum(1 for keyword in node.keywords if keyword.casefold() in tokens) for node in graph.nodes if node.terminal
 		}
-		has_track_intent = bool(tokens & {'track', 'song', 'popular', 'first', 'second', 'third', 'fourth', 'fifth'})
-		goal = SpotifyGoal.POPULAR_TRACK if has_track_intent else SpotifyGoal.CANONICAL_ARTIST
-		rank = (track_rank or self._rank_from_task(task)) if goal == SpotifyGoal.POPULAR_TRACK else None
+		has_play_intent = 'play' in tokens
+		has_track_intent = has_play_intent or bool(
+			tokens & {'track', 'song', 'popular', 'first', 'second', 'third', 'fourth', 'fifth'}
+		)
+		goal = (
+			SpotifyGoal.PLAY_TRACK
+			if has_play_intent
+			else SpotifyGoal.POPULAR_TRACK
+			if has_track_intent
+			else SpotifyGoal.CANONICAL_ARTIST
+		)
+		rank = (track_rank or self._rank_from_task(task)) if has_track_intent else None
 		if rank is not None and not 1 <= rank <= 10:
 			raise ValueError('track rank must be between 1 and 10')
 		path = graph.path_to(goal.value)
@@ -288,6 +300,14 @@ def spotify_graph_template(training: dict[str, Any] | None = None) -> SpotifyPro
 			required_parameters=['artist', 'track_rank'],
 			state_guard='ordered unique /track/ links under exact Popular heading',
 		),
+		GraphNode(
+			id='play_track',
+			description='Play the selected ranked track and verify Spotify entered a playing state.',
+			keywords=['play', 'listen', 'start'],
+			terminal=True,
+			required_parameters=['artist', 'track_rank'],
+			state_guard='selected Popular row exposes Pause after the click',
+		),
 	]
 	edges = [
 		GraphEdge(
@@ -328,6 +348,14 @@ def spotify_graph_template(training: dict[str, Any] | None = None) -> SpotifyPro
 			action=GraphAction.EXTRACT_RANKED,
 			value_from='track_rank',
 			postcondition='requested rank resolves to one visible /track/ link under Popular',
+		),
+		GraphEdge(
+			id='play_ranked_popular_track',
+			source='popular_track',
+			target='play_track',
+			action=GraphAction.PLAY_RANKED,
+			value_from='track_rank',
+			postcondition='selected Popular row play control changes to Pause',
 		),
 	]
 	identity = json.dumps(
@@ -392,6 +420,7 @@ class SpotifyGraphExecutor:
 		self.graph = graph
 		self.tools = tools or Tools()
 		self.trace_dir = trace_dir
+		self.tools.set_coordinate_clicking(True)
 		self.action_model = self.tools.registry.create_action_model(include_actions=['input', 'click'])
 
 	async def run(
@@ -506,6 +535,45 @@ class SpotifyGraphExecutor:
 						},
 					)
 				)
+			elif edge.action == GraphAction.PLAY_RANKED:
+				if report.track is None:
+					return self._refuse(report, edge, 'ranked track was not extracted before playback')
+				target = await self._wait_for_play_target(browser_session, report.track)
+				if target is None:
+					return self._refuse(report, edge, 'play control did not resolve to one rendered target')
+				result = await self.tools.act(
+					self.action_model.model_validate({'click': {'coordinate_x': target['x'], 'coordinate_y': target['y']}}),
+					browser_session,
+					action_timeout=15,
+				)
+				if result.error:
+					return self._refuse(report, edge, f'Browser Use play click failed: {result.error}')
+				playback = await self._wait_for_playback(browser_session, report.track)
+				if playback.get('auth_required'):
+					return self._refuse(
+						report,
+						edge,
+						'Spotify requires a signed-in session for playback; sign in once in the persistent demo profile and retry',
+					)
+				if not playback.get('playing'):
+					return self._refuse(report, edge, 'playback state did not change to Pause')
+				report.playback_started = True
+				report.events.append(
+					GraphEvent(
+						edge_id=edge.id,
+						source=edge.source,
+						target=edge.target,
+						status='executed',
+						evidence={
+							'rank': report.track.rank,
+							'track_name': report.track.name,
+							'track_url': report.track.url,
+							'playback_started': True,
+							'row_control': 'Pause',
+							'current_geometry': {'x': target['x'], 'y': target['y']},
+						},
+					)
+				)
 		report.terminal_node = intent.goal_node.value
 		if self.trace_dir and report.artist_url:
 			report.trace_path = str(await self._write_trace(report, browser_session))
@@ -614,6 +682,94 @@ class SpotifyGraphExecutor:
 			await asyncio.sleep(0.2)
 		return None
 
+	@staticmethod
+	async def _play_target(browser_session: BrowserSession, track: SpotifyTrack) -> dict[str, int] | None:
+		try:
+			page = await browser_session.must_get_current_page()
+			payload = await page.evaluate(
+				"""(trackPath) => JSON.stringify((() => {
+					const visible = node => Boolean(node && node.offsetParent);
+					const popular = Array.from(document.querySelectorAll('h2')).find(node =>
+						visible(node) && node.textContent.trim().toLowerCase() === 'popular'
+					);
+					let container = popular;
+					while (container && container.querySelectorAll('a[href^="/track/"]').length === 0) {
+						container = container.parentElement;
+					}
+					const links = Array.from(container?.querySelectorAll('a[href^="/track/"]') || []).filter(node =>
+						new URL(node.getAttribute('href'), location.origin).pathname === trackPath && visible(node)
+					);
+					const rows = [...new Set(links.map(link => link.closest('[role="row"]')).filter(Boolean))];
+					const targets = rows.map(row => Array.from(row.querySelectorAll('button')).find(button =>
+						/^play\\b/i.test(button.getAttribute('aria-label') || '')
+					)).filter(Boolean);
+					if (targets.length !== 1) return null;
+					const rect = targets[0].getBoundingClientRect();
+					if (rect.width <= 0 || rect.height <= 0) return null;
+					return {x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2)};
+				})())""",
+				urlsplit(track.url).path,
+			)
+			return json.loads(payload)
+		except Exception:
+			return None
+
+	async def _wait_for_play_target(
+		self, browser_session: BrowserSession, track: SpotifyTrack, timeout: float = 10
+	) -> dict[str, int] | None:
+		deadline = time.monotonic() + timeout
+		while time.monotonic() < deadline:
+			target = await self._play_target(browser_session, track)
+			if target is not None:
+				return target
+			await asyncio.sleep(0.2)
+		return None
+
+	@staticmethod
+	async def _playback_state(browser_session: BrowserSession, track: SpotifyTrack) -> dict[str, bool]:
+		try:
+			page = await browser_session.must_get_current_page()
+			payload = await page.evaluate(
+				"""(trackPath, trackName) => JSON.stringify((() => {
+					const visible = node => Boolean(node && node.offsetParent);
+					const link = Array.from(document.querySelectorAll('a[href^="/track/"]'))
+						.find(node => new URL(node.getAttribute('href'), location.origin).pathname === trackPath && visible(node));
+					const row = link?.closest('[role="row"]');
+					const rowControl = row ? Array.from(row.querySelectorAll('button')).find(button =>
+						/^(play|pause)\\b/i.test(button.getAttribute('aria-label') || '')
+					) : null;
+					const label = rowControl?.getAttribute('aria-label') || '';
+					const nowPlaying = document.querySelector('[aria-label^="Now playing:"]');
+					const nowPlayingLabel = nowPlaying?.getAttribute('aria-label') || '';
+					const globalPause = document.querySelector('[data-testid="control-button-playpause"][aria-label="Pause"]');
+					const text = document.body.innerText.toLowerCase();
+					return {
+						playing: /^pause\\b/i.test(label) || Boolean(
+							globalPause && !globalPause.disabled && nowPlayingLabel.toLowerCase().includes(trackName.toLowerCase())
+						),
+						auth_required: text.includes('start listening with a free spotify account')
+							|| text.includes('sign up to start listening'),
+					};
+				})())""",
+				urlsplit(track.url).path,
+				track.name,
+			)
+			return json.loads(payload)
+		except Exception:
+			return {'playing': False, 'auth_required': False}
+
+	async def _wait_for_playback(
+		self, browser_session: BrowserSession, track: SpotifyTrack, timeout: float = 8
+	) -> dict[str, bool]:
+		deadline = time.monotonic() + timeout
+		last = {'playing': False, 'auth_required': False}
+		while time.monotonic() < deadline:
+			last = await self._playback_state(browser_session, track)
+			if last.get('playing') or last.get('auth_required'):
+				return last
+			await asyncio.sleep(0.2)
+		return last
+
 	async def _wait_for_artist_page(
 		self, browser_session: BrowserSession, artist: str, timeout: float = 10
 	) -> dict[str, Any] | None:
@@ -689,12 +845,13 @@ async def run_spotify_task(
 	viewport_width: int = 1280,
 	viewport_height: int = 800,
 	linger_seconds: float = 0,
+	user_data_dir: Path | None = None,
 ) -> SpotifyGraphReport:
 	"""Run one graph task in a fresh Browser Use Chromium session."""
 	procedure_graph = graph or spotify_graph_template()
 	profile = BrowserProfile(
 		headless=headless,
-		user_data_dir=None,
+		user_data_dir=user_data_dir,
 		window_size=ViewportSize(width=viewport_width, height=viewport_height),
 	)
 	browser_session = BrowserSession(browser_profile=profile)

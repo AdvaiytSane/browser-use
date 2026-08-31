@@ -1,6 +1,6 @@
 {
   "schema_version": "0.1.0",
-  "graph_id": "865f92c01645d6d406cb",
+  "graph_id": "e03e6a7dceb7f168f36e",
   "entry_node": "spotify_home",
   "parameters": [
     "artist",
@@ -71,6 +71,21 @@
         "track_rank"
       ],
       "state_guard": "ordered unique /track/ links under exact Popular heading"
+    },
+    {
+      "id": "play_track",
+      "description": "Play the selected ranked track and verify Spotify entered a playing state.",
+      "keywords": [
+        "play",
+        "listen",
+        "start"
+      ],
+      "terminal": true,
+      "required_parameters": [
+        "artist",
+        "track_rank"
+      ],
+      "state_guard": "selected Popular row exposes Pause after the click"
     }
   ],
   "edges": [
@@ -123,6 +138,15 @@
       "locator": null,
       "value_from": "track_rank",
       "postcondition": "requested rank resolves to one visible /track/ link under Popular"
+    },
+    {
+      "id": "play_ranked_popular_track",
+      "source": "popular_track",
+      "target": "play_track",
+      "action": "play_ranked",
+      "locator": null,
+      "value_from": "track_rank",
+      "postcondition": "selected Popular row play control changes to Pause"
     }
   ],
   "training": {

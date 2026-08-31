@@ -41,9 +41,16 @@ from examples.integrations.memorable.spotify_graph import (
 		(
 			'navigate to Portraits of Tracy and play the best song',
 			'Portraits of Tracy',
-			SpotifyGoal.POPULAR_TRACK,
+			SpotifyGoal.PLAY_TRACK,
 			1,
-			['spotify_home', 'search_results', 'canonical_artist', 'popular_track'],
+			['spotify_home', 'search_results', 'canonical_artist', 'popular_track', 'play_track'],
+		),
+		(
+			'Search Spotify for Daft Punk and play the third track',
+			'Daft Punk',
+			SpotifyGoal.PLAY_TRACK,
+			3,
+			['spotify_home', 'search_results', 'canonical_artist', 'popular_track', 'play_track'],
 		),
 		(
 			'Can you find me the best song by Portraits of Tracy',
@@ -128,3 +135,11 @@ def test_demo_server_request_is_narrow_and_bounded() -> None:
 def test_search_postcondition_rejects_partial_spotify_query() -> None:
 	assert search_url_matches_artist('https://open.spotify.com/search/Portraits%20of%20Tracy', 'Portraits of Tracy')
 	assert not search_url_matches_artist('https://open.spotify.com/search/Portraits%20of%20T', 'Portraits of Tracy')
+
+
+def test_playback_is_an_optional_terminal_after_extraction() -> None:
+	graph = spotify_graph_template()
+
+	assert graph.path_to('popular_track')[-1].id == 'read_ranked_popular_track'
+	assert graph.path_to('play_track')[-1].id == 'play_ranked_popular_track'
+	assert graph.node('play_track').terminal is True

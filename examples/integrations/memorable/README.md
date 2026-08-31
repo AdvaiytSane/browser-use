@@ -10,15 +10,11 @@ Start the loopback demo server from the repository root:
 uv run python examples/integrations/memorable/spotify_demo_server.py --no-headless
 ```
 
-Then open `http://127.0.0.1:8765/`. The dashboard runs the compiled registration procedure against three live browser scenarios:
+Then open `http://127.0.0.1:8765/`. The dashboard routes Spotify tasks through one parameterized graph. A run can stop at the canonical artist page, extract a ranked Popular track, or play that track. Every run gets an evidence-backed graph card in the dashboard.
 
-- a two-stage layout where the optional `Continue` transition is present;
-- a narrow, reordered layout with random IDs where replay safely skips that absent transition;
-- an ambiguous layout with two exact submit matches where replay stops before either click.
+The server keeps one visible Chromium window open and reuses `./tmp/spotify-demo-profile`, so playback can retain an authenticated Spotify session. On the first guest playback attempt, sign in in that window and rerun the task. Guest playback is reported as `needs_recovery`; it is never misreported as success. Override the profile location with `--profile-dir`. Follows, likes, and playlist mutations remain disabled.
 
-The dashboard is a visual, same-origin executor for the checked-in procedure contract in `sites/demo-procedure.json`. The production-shaped Python replay path below remains the source of truth for Browser Use integration and executes actions through `Tools.act()`.
-
-The Spotify graph panel also POSTs its task to this loopback server, which launches a visible fresh Chromium window and returns the verified graph result. A plain `python -m http.server` can render the page but cannot run Browser Use, so the Spotify button will explicitly report that the live runner is unavailable.
+The dashboard POSTs its task to the loopback server, which launches visible Chromium and returns the verified graph result. A plain `python -m http.server` can render the page but cannot run Browser Use, so the Spotify button explicitly reports that the live runner is unavailable.
 
 ## Capture a run
 

@@ -27,144 +27,30 @@
     <section class="hero">
       <div>
         <p class="eyebrow">Procedural memory for browser agents</p>
-        <h1>Run it once with an agent.<br><span>Replay it without one.</span></h1>
+        <h1>One learned graph.<br><span>Any Spotify artist.</span></h1>
         <p class="hero-copy">
-          A procedure compiled from three real Browser Use traces rebinds against the current DOM,
-          executes only unique semantic targets, and verifies every result in the live page.
+          Browser Use traces compile into a task-conditioned procedure that rebinds against Spotify's
+          current DOM, follows only the requested path, and makes zero model calls at replay time.
         </p>
       </div>
       <div class="corpus-card" aria-label="Training corpus summary">
         <p class="card-kicker">Compiled evidence</p>
         <div class="corpus-metrics">
-          <div><strong>3</strong><span>verified runs</span></div>
-          <div><strong>2</strong><span>route variants</span></div>
-          <div><strong>6</strong><span>procedure steps</span></div>
+          <div><strong>3</strong><span>verified traces</span></div>
+          <div><strong>3</strong><span>training artists</span></div>
+          <div><strong>5</strong><span>graph nodes</span></div>
         </div>
         <div class="procedure-id">
           <span>procedure</span>
-          <code>fd257563ee2b1d42dbd0</code>
+          <code id="spotify-graph-id">loading…</code>
         </div>
       </div>
-    </section>
-
-    <section class="scenario-strip" aria-label="Choose a replay scenario">
-      <button class="scenario active" data-scenario="variant-a" type="button">
-        <span class="scenario-number">01</span>
-        <span><strong>Two-stage flow</strong><small>Continue button is present</small></span>
-        <span class="scenario-tag">1280px</span>
-      </button>
-      <button class="scenario" data-scenario="variant-b" type="button">
-        <span class="scenario-number">02</span>
-        <span><strong>Reordered DOM</strong><small>Random IDs · no Continue</small></span>
-        <span class="scenario-tag">500px</span>
-      </button>
-      <button class="scenario danger" data-scenario="ambiguous" type="button">
-        <span class="scenario-number">03</span>
-        <span><strong>Ambiguity test</strong><small>Two identical submit targets</small></span>
-        <span class="scenario-tag">refuse</span>
-      </button>
-    </section>
-
-    <section class="workspace">
-      <aside class="control-panel">
-        <div class="panel-heading">
-          <div>
-            <p class="panel-kicker">Runtime parameters</p>
-            <h2>Replay controls</h2>
-          </div>
-          <button id="reset-button" class="icon-button" type="button" aria-label="Reset scenario">↻</button>
-        </div>
-
-        <form id="parameter-form">
-          <label>
-            <span>Full name</span>
-            <input name="full_name" value="Ada Lovelace" autocomplete="off">
-          </label>
-          <label>
-            <span>Email</span>
-            <input name="email" value="ada.lovelace@example.test" autocomplete="off">
-          </label>
-          <label>
-            <span>Country</span>
-            <select name="country">
-              <option>Canada</option>
-              <option>United States</option>
-              <option>United Kingdom</option>
-            </select>
-          </label>
-          <button id="run-button" class="run-button" type="submit">
-            <span class="run-icon">▶</span>
-            <span>Run deterministic replay</span>
-          </button>
-        </form>
-
-        <div class="guardrails">
-          <div><span>✓</span><p><strong>Fresh DOM</strong><small>Re-resolved before every action</small></p></div>
-          <div><span>✓</span><p><strong>Exact uniqueness</strong><small>No score can override ambiguity</small></p></div>
-          <div><span>✓</span><p><strong>Live verification</strong><small>Browser state proves each result</small></p></div>
-        </div>
-      </aside>
-
-      <section class="browser-panel">
-        <div class="browser-chrome">
-          <div class="traffic-lights"><i></i><i></i><i></i></div>
-          <div class="address-bar">
-            <span class="lock">◇</span>
-            <span id="address-text">127.0.0.1:8765/variant-a.html</span>
-          </div>
-          <div id="viewport-badge" class="viewport-badge">1280 × 800</div>
-        </div>
-        <div id="browser-stage" class="browser-stage wide">
-          <iframe id="target-frame" title="Live website under deterministic replay" src="variant-a.html"></iframe>
-          <div id="target-callout" class="target-callout" hidden>
-            <span class="callout-dot"></span>
-            <span id="target-callout-text">Unique target</span>
-          </div>
-        </div>
-        <div class="browser-footer">
-          <div><span class="footer-label">Current state</span><strong id="current-state">Ready to replay</strong></div>
-          <div><span class="footer-label">Current selector</span><code id="current-selector">fresh DOM only</code></div>
-          <div><span class="footer-label">Historical coordinates</span><strong class="never-used">never used</strong></div>
-        </div>
-      </section>
-
-      <aside class="trace-panel">
-        <div class="trace-header">
-          <div>
-            <p class="panel-kicker">Execution audit</p>
-            <h2>Live trace</h2>
-          </div>
-          <span id="run-status" class="status-badge idle">idle</span>
-        </div>
-
-        <div id="resolver-card" class="resolver-card">
-          <div class="resolver-topline">
-            <span>Semantic resolver</span>
-            <span id="match-count" class="match-count">— matches</span>
-          </div>
-          <p id="resolver-title">Waiting for a step</p>
-          <div id="locator-chips" class="locator-chips">
-            <span>role</span><span>name</span><span>attributes</span>
-          </div>
-          <div class="geometry-line">
-            <span>current geometry</span>
-            <code id="geometry-value">queried after binding</code>
-          </div>
-        </div>
-
-        <ol id="trace-list" class="trace-list" aria-live="polite">
-          <li class="empty-trace">
-            <span class="empty-orbit"></span>
-            <p>Choose a scenario and run the procedure to inspect every decision.</p>
-          </li>
-        </ol>
-      </aside>
     </section>
 
     <section class="spotify-lab" aria-labelledby="spotify-title">
       <div class="spotify-copy">
         <p class="eyebrow">Live public-site proof</p>
-        <h2 id="spotify-title">One graph. Any artist. Task-chosen stopping point.</h2>
+        <h2 id="spotify-title">Route a task, then watch it execute.</h2>
         <p>
           Three verified Spotify runs compile into parameterized nodes—not artist-specific scripts.
           The task binds <code>artist</code> and optional <code>track_rank</code>, then retrieves only
@@ -176,6 +62,7 @@
           <div class="spotify-presets">
             <button type="button" data-task="Open the verified artist result for Radiohead and stop there">Stop at artist</button>
             <button type="button" data-task="Search Spotify for Björk and identify the third popular track">Third track</button>
+			<button type="button" data-task="Search Spotify for Daft Punk and play the first popular track">Play first track</button>
             <button type="submit">Run live on Spotify</button>
           </div>
         </form>
@@ -194,13 +81,27 @@
         <div id="spotify-graph" class="graph-flow" aria-label="Retrieved Spotify graph path"></div>
         <div id="spotify-result" class="graph-result">Loading the compiled graph…</div>
         <p class="graph-note">
-          A visible Chromium window opens outside this dashboard during a live run. Playback and account mutations are intentionally disabled.
+		  A visible Chromium window opens outside this dashboard during a live run. Playback tasks require a
+		  signed-in Spotify session in the persistent demo profile; follows, likes, and playlists remain disabled.
           <br>
           “Verified” here is an evidence predicate: exact requested name in Spotify's Top Result,
           canonical <code>/artist/</code> URL, exact artist-page heading, and a Popular section.
           Spotify exposed no reliable verified badge in the observed public DOM.
         </p>
       </div>
+    </section>
+
+    <section class="run-history-panel" aria-labelledby="run-history-title">
+      <div class="run-history-heading">
+        <div>
+          <p class="eyebrow">Observed execution graphs</p>
+          <h2 id="run-history-title">Every run, mapped to evidence.</h2>
+        </div>
+        <span id="spotify-run-count">0 runs</span>
+      </div>
+      <ol id="spotify-run-history" class="run-history" aria-live="polite">
+        <li class="run-history-empty">Live runs appear here with their actual node states and browser evidence.</li>
+      </ol>
     </section>
 
     <section class="explanation-row">
