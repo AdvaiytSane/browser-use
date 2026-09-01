@@ -200,6 +200,22 @@ uv run python examples/integrations/memorable/bu_bench.py \
 
 The runner rejects non-interaction tasks by default, checks the procedure's task fingerprint, resolves every action against fresh DOM state, and starts an agent fallback in a fresh browser after replay refusal. Fallback cost and duration remain a distinct result mode. Benchmark prompts, answers, captures, screenshots, and judge reasoning remain private local artifacts and must not be committed.
 
+## Seeded DOM mutation benchmark
+
+`mutation_benchmark.py` measures whether the DOM logic materially changes outcomes. It opens a fresh browser for each seed, mutates the live page before replay, and reports three mutually exclusive outcomes: verified completion, safe refusal, or incorrect interaction. The sweep never invokes a model or judge.
+
+```bash
+uv run python examples/integrations/memorable/mutation_benchmark.py \
+  ./tmp/bu-bench-memory/procedure.json \
+  https://browser-use.github.io/stress-tests/challenges/non-latin-form.html \
+  --output-dir ./tmp/bu-bench-mutations --repeat 3 \
+  -p country='مصر' -p birth_date='2000-05-05' \
+  -p document='/absolute/path/مستند-تجريبي.txt' \
+  -p email='test@example.com'
+```
+
+The five classes randomize IDs and viewports, reorder and wrap controls, add hidden decoys, change accessible labels, duplicate the visible submit target, or obstruct it with an overlay. Accessible-name drift can rebind only when the remaining role and stable DOM attributes are still unique. Duplicate targets are never ranked. Per-seed private JSON and `summary.json` include Wilson intervals and keep incorrect interactions visible rather than folding them into a generic failure count.
+
 ## Privacy boundary
 
 The entire bundle is a **private raw tier**. DOM text, raw HTML, live form values, screenshots, model conversations, action inputs, downloads and HAR data can contain credentials or personal information. Conversations, HAR, video and downloads are opt-in. `manifest.json` reports credential-shaped matches but does not redact or delete the raw evidence.

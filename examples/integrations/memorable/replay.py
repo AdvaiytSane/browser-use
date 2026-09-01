@@ -41,6 +41,11 @@ class ResolutionStatus(str, Enum):
 	NOT_ACTIONABLE = 'not_actionable'
 
 
+class ResolutionStrategy(str, Enum):
+	EXACT_SEMANTIC = 'exact_semantic'
+	ACCESSIBLE_NAME_DRIFT = 'accessible_name_drift'
+
+
 class ReplayStatus(str, Enum):
 	COMPLETED = 'completed'
 	NEEDS_RECOVERY = 'needs_recovery'
@@ -80,6 +85,9 @@ class Resolution(BaseModel):
 	match_count: int = 0
 	reason: str
 	matches: list[CandidateSnapshot] = Field(default_factory=list)
+	strategy: ResolutionStrategy | None = None
+	fields_used: dict[str, str] = Field(default_factory=dict)
+	fields_dropped: list[str] = Field(default_factory=list)
 
 
 class Verification(BaseModel):
@@ -98,6 +106,7 @@ class ReplayEvent(BaseModel):
 	locator: dict[str, str]
 	resolution_status: str
 	resolution_match_count: int
+	resolution_strategy: str | None = None
 	parameter_name: str | None = None
 	action_result: dict[str, Any] | None = None
 	postcondition: Verification | None = None
@@ -129,7 +138,7 @@ class ReplayOptions(BaseModel):
 
 
 class SemanticResolver:
-	"""Resolve exact semantic conjunctions and refuse ties."""
+	"""Resolve exact semantics, then one constrained accessible-name drift tier."""
 
 	def resolve(
 		self,
@@ -137,40 +146,100 @@ class SemanticResolver:
 		state: BrowserStateSummary,
 		action: ReplayAction,
 	) -> Resolution:
-		matches = [
-			_candidate_snapshot(index, node)
-			for index, node in sorted(state.dom_state.selector_map.items())
-			if locator_matches(locator.required, _candidate_snapshot(index, node).as_match_record())
-		]
-		if not matches:
+		candidates = [_candidate_snapshot(index, node) for index, node in sorted(state.dom_state.selector_map.items())]
+		exact_matches = [candidate for candidate in candidates if locator_matches(locator.required, candidate.as_match_record())]
+		if exact_matches:
+			return self._resolution_for_matches(
+				exact_matches,
+				action,
+				ResolutionStrategy.EXACT_SEMANTIC,
+				locator.required,
+				[],
+			)
+
+		relaxed = accessible_name_drift_fields(locator.required)
+		if relaxed is None:
 			return Resolution(
 				status=ResolutionStatus.ABSENT,
 				reason='no current DOM candidate matches every stable semantic field',
 			)
-		if len(matches) > 1:
+		relaxed_matches = [candidate for candidate in candidates if locator_matches(relaxed, candidate.as_match_record())]
+		if not relaxed_matches:
+			return Resolution(
+				status=ResolutionStatus.ABSENT,
+				reason='no candidate matches exact semantics or the constrained accessible-name drift tier',
+				strategy=ResolutionStrategy.ACCESSIBLE_NAME_DRIFT,
+				fields_used=relaxed,
+				fields_dropped=['ax_name'],
+			)
+		return self._resolution_for_matches(
+			relaxed_matches,
+			action,
+			ResolutionStrategy.ACCESSIBLE_NAME_DRIFT,
+			relaxed,
+			['ax_name'],
+		)
+
+	@staticmethod
+	def _resolution_for_matches(
+		matches: list[CandidateSnapshot],
+		action: ReplayAction,
+		strategy: ResolutionStrategy,
+		fields_used: dict[str, str],
+		fields_dropped: list[str],
+	) -> Resolution:
+		actionable = [candidate for candidate in matches if _not_actionable_reason(candidate, action) is None]
+		if len(actionable) > 1:
 			return Resolution(
 				status=ResolutionStatus.AMBIGUOUS,
-				match_count=len(matches),
-				reason='multiple current DOM candidates satisfy the exact locator; ranking is forbidden',
-				matches=matches,
+				match_count=len(actionable),
+				reason=f'multiple actionable DOM candidates satisfy {strategy.value}; ranking is forbidden',
+				matches=actionable,
+				strategy=strategy,
+				fields_used=fields_used,
+				fields_dropped=fields_dropped,
 			)
-		candidate = matches[0]
-		unsafe_reason = _not_actionable_reason(candidate, action)
-		if unsafe_reason:
+		if not actionable:
+			reasons = sorted({_not_actionable_reason(candidate, action) or 'unknown' for candidate in matches})
 			return Resolution(
 				status=ResolutionStatus.NOT_ACTIONABLE,
-				selector_index=candidate.selector_index,
-				match_count=1,
-				reason=unsafe_reason,
+				match_count=len(matches),
+				reason=f'all semantic matches are non-actionable: {reasons}',
 				matches=matches,
+				strategy=strategy,
+				fields_used=fields_used,
+				fields_dropped=fields_dropped,
 			)
+		candidate = actionable[0]
 		return Resolution(
 			status=ResolutionStatus.RESOLVED,
 			selector_index=candidate.selector_index,
 			match_count=1,
-			reason='exact semantic locator resolved uniquely and passed actionability gates',
-			matches=matches,
+			reason=f'{strategy.value} resolved uniquely and passed actionability gates',
+			matches=[candidate],
+			strategy=strategy,
+			fields_used=fields_used,
+			fields_dropped=fields_dropped,
 		)
+
+
+def accessible_name_drift_fields(required: dict[str, str]) -> dict[str, str] | None:
+	"""Drop only ``ax_name`` when stable DOM identity remains sufficiently specific."""
+
+	if 'ax_name' not in required:
+		return None
+	relaxed = {field: value for field, value in required.items() if field != 'ax_name'}
+	identity_attributes = {
+		'attributes.name',
+		'attributes.value',
+		'attributes.autocomplete',
+		'attributes.aria-label',
+		'attributes.placeholder',
+		'attributes.data-action',
+	}
+	if not identity_attributes.intersection(relaxed) and relaxed.get('attributes.type') != 'submit':
+		return None
+	return relaxed
 
 
 class DeterministicReplayer:
@@ -252,6 +321,7 @@ class DeterministicReplayer:
 								locator=step.locator.required,
 								resolution_status=resolution.status.value,
 								resolution_match_count=0,
+								resolution_strategy=resolution.strategy.value if resolution.strategy else None,
 								duration_seconds=round(time.monotonic() - event_started, 6),
 								reason='optional target is absent while a later required state is uniquely available',
 							)
@@ -281,6 +351,7 @@ class DeterministicReplayer:
 							locator=step.locator.required,
 							resolution_status=resolution.status.value,
 							resolution_match_count=resolution.match_count,
+							resolution_strategy=resolution.strategy.value if resolution.strategy else None,
 							parameter_name=_parameter_name(step.value),
 							postcondition=preverification,
 							duration_seconds=round(time.monotonic() - event_started, 6),
@@ -314,6 +385,7 @@ class DeterministicReplayer:
 							locator=step.locator.required,
 							resolution_status=resolution.status.value,
 							resolution_match_count=resolution.match_count,
+							resolution_strategy=resolution.strategy.value if resolution.strategy else None,
 							parameter_name=_parameter_name(step.value),
 							action_result=result_summary,
 							duration_seconds=round(time.monotonic() - event_started, 6),
@@ -340,6 +412,7 @@ class DeterministicReplayer:
 						locator=step.locator.required,
 						resolution_status=resolution.status.value,
 						resolution_match_count=resolution.match_count,
+						resolution_strategy=resolution.strategy.value if resolution.strategy else None,
 						parameter_name=_parameter_name(step.value),
 						action_result=result_summary,
 						postcondition=verification,
@@ -465,10 +538,30 @@ class DeterministicReplayer:
 	) -> Verification:
 		postcondition = step.postcondition
 		if postcondition.kind == PostconditionKind.TARGET_DISAPPEARS:
+			page = await _read_live_page(browser_session)
+			dom_fields = {
+				field: value
+				for field, value in step.locator.required.items()
+				if field == 'node_name' or field.startswith('attributes.')
+			}
+			if page is not None and len(dom_fields) > ('node_name' in dom_fields):
+				visible_controls = [
+					control
+					for control in page['controls']
+					if control.get('visible', True) and not control.get('hidden') and locator_matches(dom_fields, control)
+				]
+				return Verification(
+					verified=not visible_controls,
+					kind=postcondition.kind.value,
+					evidence={
+						'visible_control_match_count': len(visible_controls),
+						'provenance': 'browser-native visibility and rendered bounds',
+					},
+				)
 			state = await browser_session.get_browser_state_summary(include_screenshot=False)
 			resolution = self.resolver.resolve(step.locator, state, step.action)
 			return Verification(
-				verified=resolution.status == ResolutionStatus.ABSENT,
+				verified=resolution.status in {ResolutionStatus.ABSENT, ResolutionStatus.NOT_ACTIONABLE},
 				kind=postcondition.kind.value,
 				evidence={
 					'current_match_status': resolution.status.value,
@@ -493,7 +586,11 @@ class DeterministicReplayer:
 					'provenance': 'document.body.innerText exact substring check',
 				},
 			)
-		controls = [control for control in page['controls'] if _control_matches(step.locator.required, control)]
+		controls = [
+			control
+			for control in page['controls']
+			if control.get('visible', True) and not control.get('hidden') and _control_matches(step.locator.required, control)
+		]
 		if len(controls) != 1:
 			return Verification(
 				verified=False,
@@ -555,6 +652,7 @@ class DeterministicReplayer:
 			locator=step.locator.required,
 			resolution_status=resolution.status.value,
 			resolution_match_count=resolution.match_count,
+			resolution_strategy=resolution.strategy.value if resolution.strategy else None,
 			parameter_name=_parameter_name(step.value),
 			duration_seconds=round(time.monotonic() - started, 6),
 			reason=reason,
@@ -653,7 +751,12 @@ async def _read_live_page(browser_session: BrowserSession) -> dict[str, Any] | N
 					file_count: 'files' in element && element.files ? element.files.length : null,
 					checked: 'checked' in element ? element.checked : null,
 					disabled: 'disabled' in element ? element.disabled : null,
-					hidden: element.hidden
+					hidden: element.hidden,
+					visible: !element.hidden
+						&& getComputedStyle(element).display !== 'none'
+						&& getComputedStyle(element).visibility !== 'hidden'
+						&& element.getBoundingClientRect().width > 0
+						&& element.getBoundingClientRect().height > 0
 				}))
 			})"""
 		)

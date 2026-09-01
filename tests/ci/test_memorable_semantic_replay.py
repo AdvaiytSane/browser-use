@@ -5,6 +5,12 @@ from urllib.parse import urlsplit
 import pytest
 
 from examples.integrations.memorable import replay as replay_module
+from examples.integrations.memorable.mutation_benchmark import (
+	MutationClass,
+	TrialOutcome,
+	build_mutation_plan,
+	run_trial,
+)
 from examples.integrations.memorable.procedure import (
 	BrowserProcedure,
 	ParameterKind,
@@ -483,6 +489,39 @@ async def test_real_browser_refuses_ambiguous_submit_instead_of_guessing(
 	assert (
 		await page.evaluate("() => document.body.innerText.includes('Registration complete. Success code: MEM-042')")
 	).casefold() == 'false'
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+	('mutation_class', 'expected_outcome'),
+	[
+		(MutationClass.SEMANTIC_DRIFT, TrialOutcome.VERIFIED_COMPLETION),
+		(MutationClass.HIDDEN_DECOY, TrialOutcome.VERIFIED_COMPLETION),
+		(MutationClass.AMBIGUITY, TrialOutcome.SAFE_REFUSAL),
+	],
+)
+async def test_mutation_runner_uses_live_page_oracle(
+	httpserver,
+	tmp_path,
+	mutation_class,
+	expected_outcome,
+):
+	site = Path(__file__).parents[2] / 'examples' / 'integrations' / 'memorable' / 'sites' / 'variant-a.html'
+	httpserver.expect_request('/variant-a.html').respond_with_data(site.read_text(), content_type='text/html')
+	url = str(httpserver.url_for('/variant-a.html'))
+
+	trial = await run_trial(
+		_procedure(url),
+		url,
+		_parameters(),
+		build_mutation_plan(mutation_class, 17),
+		tmp_path / mutation_class.value,
+	)
+
+	assert trial.outcome == expected_outcome
+	assert trial.model_calls == 0
+	assert trial.incorrect_interaction_count == 0
 
 
 @pytest.mark.asyncio
