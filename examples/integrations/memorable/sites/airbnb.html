@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Memorable · Airbnb</title>
+		<link rel="stylesheet" href="/airbnb.css" />
+		<script src="/airbnb.js" defer></script>
+	</head>
+	<body>
+		<main class="shell">
+			<header class="brand" aria-label="Memorable Airbnb demo">
+				<span class="mark" aria-hidden="true"></span>
+				<span>memorable</span>
+				<span class="divider">/</span>
+				<span class="muted">airbnb</span>
+			</header>
+
+			<div class="workspace">
+				<section class="hero">
+					<p class="eyebrow">Natural-language navigation</p>
+					<h1>Where should we look?</h1>
+					<p class="intro">Describe the outcome. Watch the graph switch between deterministic execution, bounded agent decisions, and repairs.</p>
+
+					<form id="task-form" class="search" novalidate>
+						<label class="sr-only" for="task">Airbnb task</label>
+						<textarea
+							id="task"
+							name="task"
+							rows="3"
+							maxlength="1000"
+							placeholder="Describe an Airbnb search"
+							required
+						>Find the least expensive Airbnb in Chicago for two adults from October 16 to October 18, 2026.</textarea>
+						<button id="run" type="submit" aria-label="Run task">
+							<span>Run</span>
+							<span aria-hidden="true">→</span>
+						</button>
+					</form>
+					<div id="status" class="status" role="status" aria-live="polite"></div>
+					<section id="result" class="result" aria-live="polite" hidden></section>
+				</section>
+
+				<section class="observer" aria-label="Live browser run">
+					<div class="observer-head">
+						<div>
+							<p class="panel-kicker">Live execution</p>
+							<h2>Browser + actions</h2>
+						</div>
+						<span id="run-state" class="run-state idle">Idle</span>
+					</div>
+
+					<div id="browser-frame" class="browser-frame" data-mode="idle">
+						<div class="browser-bar">
+							<div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+						<div id="browser-url" class="browser-url">Waiting for a run</div>
+						<div id="dom-signature" class="dom-signature">DOM —</div>
+						</div>
+						<div class="browser-stage">
+							<strong id="screen-mode" class="screen-mode">Waiting</strong>
+							<div id="browser-empty" class="browser-empty">
+								<span class="empty-mark" aria-hidden="true"></span>
+								<p>Browser snapshots appear here at each action boundary.</p>
+							</div>
+							<img id="browser-shot" alt="Current Browser Use Chromium state" hidden />
+						</div>
+					</div>
+
+					<div class="legend" aria-label="Execution mode colors">
+						<span class="mode-deterministic">Deterministic</span>
+						<span class="mode-agent">Agent decision</span>
+						<span class="mode-repair">Popup repair</span>
+						<span class="mode-refuse">Refusal</span>
+					</div>
+
+					<div class="stream-head">
+						<h3>Action stream</h3>
+						<span id="action-count">0 actions</span>
+					</div>
+					<ol id="action-stream" class="action-stream" aria-live="polite">
+						<li class="stream-empty">Run a task to populate the trace.</li>
+					</ol>
+					<p class="observer-note">Agent entries expose structured decisions and tool calls, never hidden chain-of-thought.</p>
+				</section>
+			</div>
+
+			<footer>Read-only demo · event-paced screenshots · no booking or account changes</footer>
+		</main>
+	</body>
+</html>
